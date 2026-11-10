@@ -36,7 +36,7 @@
 \renewcommand{\thefootnote}{\fnsymbol{footnote}}
 \footnotetext[1]{The abbreviation CONV invites an implicit implementation
 question: can the formal operator be compiled into a convolutional
-realization? Section~XII answers that question.}
+realization? Sections~XII and~XIII answer that question.}
 \endgroup
 
 \begin{abstract}
@@ -50,13 +50,21 @@ arbitrary endpoint-aligned target lattices; dyadic analysis and integer-scale
 polyphase evaluation are specializations of that continuous operator.
 Within each Cartesian factor, ringing is suppressed by projecting the
 high-order proposal onto a signed current fibre whose derivative-sign
-variation cannot exceed that of the sampled differences.
+variation cannot exceed that of the sampled differences. A second,
+ledger-free admission obtains the same variation bound and the same
+conservation law from a box built on each cell and its two neighbours. It
+is a continuous piecewise-affine function of six samples, it needs no
+scan, sort or root search, and it is evaluated as a fixed sequence of
+minima and maxima; in native code it is up to eight times faster than the
+ledger form and its cost no longer depends on the image. A bounded
+seventh-degree bubble then removes 86\% of the leading smooth-cell error
+energy without weakening the bound.
 \end{abstract}
 
 \begin{IEEEkeywords}
 Interpolation, resampling, variation diminishing, Bernstein polynomial,
 Eikonal coordinates, structure tensor, lifting scheme, reversible transform,
-ringing.
+ringing, piecewise-affine filter, streaming.
 \end{IEEEkeywords}
 
 \section{Introduction}
@@ -106,6 +114,19 @@ endpoint-aligned target coordinates. Dyadic cell-average analysis and
 integer-phase compilation are consequently specializations of one
 interpolant: the former supplies a matched reversible state, whereas the
 latter supplies a repeated phase bank for efficient evaluation.
+
+The sign lineage is the one part of this construction that resists a
+bounded realization: it requires a scan of unbounded reach, and its cost
+follows the data. Section~\ref{sec:box} shows that the lineage is
+sufficient for the variation law but not necessary. Clipping the
+proposal into a box determined by the two neighbouring cells, and only
+then restoring the cell mass, gives the same bound with no ledger. The
+mass correction has an explicit maximum-of-five-forms solution, the
+admitted current becomes a continuous function of six samples, and a
+factor can be evaluated as a lockstep stream over all of its lines. The
+same section adds one bounded odd bubble per cell, which recovers most
+of the accuracy that the first-derivative stencil and the admission
+give up.
 
 \section{Relation to Existing Reconstruction}
 
@@ -1216,6 +1237,8 @@ Within a chamber having fixed lineage boundaries and active clip sets, the
 operator is affine and hence Lipschitz. Across chamber boundaries,
 \eqref{eq:currentbound}--\eqref{eq:msebound} provide the global absolute
 bound without assuming differentiability of the discrete selection map.
+Section~\ref{sec:box} gives an admission with no discrete selection, for
+which the complete factor is continuous and piecewise affine.
 
 % BEGIN CONSERVATIVE MULTIRESOLUTION CORE
 \section{Restriction and Matched Multiresolution Geometry}
@@ -1651,6 +1674,8 @@ clips per cell and component. Cartesian implementations of CONV, the raw
 quintic, Lanczos, and PCHIP require a factor barrier; EASU instead evaluates a
 direct two-dimensional target rule. Section~XI reports reference-CPU wall
 times in order to expose the scale of this implementation cost.
+Section~\ref{sec:box} removes the ordered-boundary scan, the sort-and-test
+threshold and the data dependence of this cost.
 
 \paragraph{Measured native cost reduction}
 A matched native C implementation on an Apple M4 Mini measures the recurrence
@@ -1674,7 +1699,10 @@ all lines of one Cartesian factor are independent and may be processed in
 parallel. A barrier is required only between factors, since the next factor
 analyzes the values produced by the preceding one. When several target
 lattices query the same source, the arrays \(\{Q_{ij}\}\) or
-\(\{c_{ij}\}\) may be cached.
+\(\{c_{ij}\}\) may be cached. With the ledger-free admission of
+Section~\ref{sec:box} the lines of a factor are also independent
+\emph{within one instruction}: every line executes the same operations,
+so lines become vector lanes and the barrier becomes a bounded delay.
 
 \subsection{Boundary evaluation}
 
@@ -2225,7 +2253,9 @@ CONV$^{*}$ is 3.09 times the Lanczos-3 time and 5.71 times the EASU time. At
 eightfold synthesis it is 1.46 times the Lanczos-3 time and 1.74 times the
 EASU time. These measurements
 characterize the present CPU realization;
-they are not used in any analytical claim.
+they are not used in any analytical claim. They predate the ledger-free
+admission; Table~\ref{tab:boxcost} measures the admission step itself in
+both forms.
 
 Table~\ref{tab:binary64audit} is an implementation audit, not a substitute for
 the preceding exact-arithmetic proofs. It uses 80 deterministic Gaussian
@@ -2489,6 +2519,9 @@ contradiction.
 Therefore the scan must be retained rather than approximated by a bounded
 convolution. It involves linear work with one sign of persistent state per
 component, while all lines of a Cartesian factor remain independent.
+The proposition concerns the ledger. Section~\ref{sec:box} shows that the
+variation bound which the ledger enforces can be obtained without it, by
+an operator of fixed finite support.
 
 \subsection{Vectorized scalar-threshold admission}
 
@@ -2610,8 +2643,670 @@ nonlinear state to scans and a five-value piecewise-affine root. Whether that
 arithmetic advantage offsets the intermediate factor traffic is a property
 of a concrete implementation and target architecture. No performance claim
 is made here; equations \eqref{eq:thresholdcurrent}--\eqref{eq:starwindowseparation}
-specify the exact reduced form for such an implementation.
+specify the exact reduced form for such an implementation. The next
+section removes the scans altogether and reports measurements.
 % END COMPOSED CONVSTAR
+
+% BEGIN LEDGER-FREE ADMISSION (2026-11 revision)
+\section{Ledger-Free Admission and the Streaming Realization}
+\label{sec:box}
+
+Section~\ref{sec:convstar} reduces every arithmetic step of a factor to a
+fixed primitive, with one exception: the sign ledger. Its zero-sign filling
+has no bounded receptive field, its boundaries are chosen by a causal scan
+with a tie rule, and its cost depends on the data, since each observed
+transition starts a candidate search. That proposition constrains the
+\emph{ledger}. It does not constrain the property for which the ledger was
+introduced, namely the bound \eqref{eq:vardim}. This section shows that the
+same bound, together with cardinality and cell-current conservation, is
+delivered by an admission that never forms a ledger. Each cell is admitted
+from itself and its two neighbours by a fixed sequence of additions,
+multiplications by constants, minima and maxima. The result is a continuous
+piecewise-affine function of six samples, so the nonlinear part of a factor
+becomes a shift-invariant finite-support operator. In that sense the
+question of the title footnote has a second and stronger answer.
+
+The operator of this section is not algebraically identical to that of
+Section~VI. Both use the same two-jet proposal \eqref{eq:rawcurrent}, the
+same synthesis \eqref{eq:synthesis}, and agree on every cell whose raw
+current has one sign; they differ on the cells where the proposal must be
+corrected. We write \(\Tcal_\square\) for the box-admitted factor and keep
+\(\Tcal\) for the ledger factor.
+
+\subsection{Unsigned neighbour box}
+
+Write \([x]_+=\max(x,0)\) and \([x]_-=\max(-x,0)\). For a sign
+\(s\in\{+,-\}\) let \(\bar s\) be the opposite sign. Outside the line put
+\(\delta_{-1}=\delta_{N-1}=0\) and \(a_{-1,4}=a_{N-1,0}=0\). For cell \(i\)
+define the head and tail allowances
+\begin{align}
+ h_i^s&=\min\bigl\{[\delta_{i-1}]_s,\,
+ \bigl[[a_{i0}]_s-[a_{i-1,4}]_{\bar s}\bigr]_+\bigr\},\nonumber\\
+ t_i^s&=\min\bigl\{[\delta_{i+1}]_s,\,
+ \bigl[[a_{i4}]_s-[a_{i+1,0}]_{\bar s}\bigr]_+\bigr\},
+ \label{eq:boxallow}
+\end{align}
+their running minima through the cell,
+\begin{align}
+ H_{ij}^s&=\min\{h_i^s,[a_{i0}]_s,\ldots,[a_{ij}]_s\},\nonumber\\
+ T_{ij}^s&=\min\{t_i^s,[a_{ij}]_s,\ldots,[a_{i4}]_s\},
+ \label{eq:boxruns}
+\end{align}
+and the rooms
+\(\varrho_{ij}^s=H_{ij}^s+T_{ij}^s\),
+\(\varrho_i^s=\sum_{j=0}^{4}\varrho_{ij}^s\). The box of cell \(i\) is
+\begin{align}
+ u_{ij}&=\varrho_{ij}^{+}+[\delta_i]_+
+ +\min\{\varrho_i^{-},4[\delta_i]_+\},\nonumber\\
+ l_{ij}&=-\bigl(\varrho_{ij}^{-}+[\delta_i]_-
+ +\min\{\varrho_i^{+},4[\delta_i]_-\}\bigr).
+ \label{eq:box}
+\end{align}
+The box is \emph{unsigned}: no term is selected by the sign of the cell's
+own secant, and the same expressions are evaluated on every cell.
+
+Each term has one purpose. A current of the cell's own sign is always
+allowed up to \(|\delta_i|\). A current of the opposite sign is allowed
+only inside a contiguous run of raw currents of that sign which starts at
+an end of the cell, only if the neighbouring secant on that side has that
+sign, and never by more than that secant or than the smallest raw
+magnitude met so far in the run. The second entry of each minimum in
+\eqref{eq:boxallow} is a knot exclusivity: of the two cells meeting at a
+knot, only the one whose terminal raw current conflicts more may carry a
+crossing. The last term of \eqref{eq:box} returns to the own-sign currents
+the mass that admitted opposite-sign runs remove, capped at four times the
+secant, so that every bound satisfies
+\(|u_{ij}|,|l_{ij}|\le\varrho_{ij}^{\pm}+5|\delta_i|\).
+
+For the two-jet proposal the knot terms simplify. From
+\eqref{eq:controls},
+\begin{equation}
+ a_{i-1,4}=a_{i0}=\frac{m_i}{5},
+ \label{eq:sharedslope}
+\end{equation}
+so that \(h_i^s=\min\{[\delta_{i-1}]_s,[m_i]_s/5\}\) and
+\(t_i^s=\min\{[\delta_{i+1}]_s,[m_{i+1}]_s/5\}\). A crossing between a
+falling and a rising secant is therefore placed in the cell toward which
+the shared nodal slope still points, and at the knot when that slope
+vanishes. Equations \eqref{eq:boxallow}--\eqref{eq:box} are stated for an
+arbitrary proposal because the proof below does not use
+\eqref{eq:sharedslope}.
+
+\begin{lemma}[Feasibility and fixed points]
+\label{lem:boxfeasible}
+For every cell, \(l_{ij}\le0\le u_{ij}\) and
+\(\sum_jl_{ij}\le\delta_i\le\sum_ju_{ij}\). If every raw current of the
+cell is zero or has the sign of \(\delta_i\), then
+\(l_{ij}\le a_{ij}\le u_{ij}\) for all \(j\).
+\end{lemma}
+
+\begin{proof}
+All rooms are nonnegative, which gives the first claim, and
+\(\sum_ju_{ij}\ge5[\delta_i]_+\ge\delta_i\ge-5[\delta_i]_-\ge\sum_jl_{ij}\).
+If \(\delta_i\ge0\) and every \(a_{ij}\ge0\), then
+\(0\le a_{ij}\le\sum_ka_{ik}=\delta_i\le u_{ij}\); the other sign is the
+mirror image.
+\end{proof}
+
+\subsection{Preclipped projection and the capacity threshold}
+
+Let \(q_{ij}=\min\{u_{ij},\max\{l_{ij},a_{ij}\}\}\) be the raw current
+clipped into its box. The admitted current is the Euclidean projection of
+the \emph{clipped} proposal,
+\begin{equation}
+ c_i=\arg\min\bigl\{\norm{c-q_i}_2^2:\;
+ l_i\le c\le u_i,\ \bm1^{\mathsf T}c=\delta_i\bigr\}.
+ \label{eq:boxprojection}
+\end{equation}
+This is in general a different point from the projection of \(a_i\)
+itself, and the difference is essential. In one recorded cell with
+\(\delta_i=-9.68\times10^{-4}\) and
+\(a_i\approx(0.0142,\,0.0070,\,0.1024,\,-0.1099,\,-0.0146)\), projecting
+\(a_i\) onto the same box and mass plane returns the sign pattern
+\((+,-,+,-,-)\): the large third current stays in the common multiplier
+after its own output is capped, and pushes its neighbour through zero.
+Projecting \(q_i\) returns
+\((0.0077,\,0.0005,\,0.0005,\,-0.0048,\,-0.0048)\), with one sign change
+and the prescribed mass. Clipping first is what orders the runs in the
+proof of Theorem~\ref{thm:boxvariation}.
+
+Because \(q_i\) already lies in the box, its mass can be wrong in only one
+direction, and the projection has a closed form. Put
+\begin{equation}
+ r_i=\bm1^{\mathsf T}q_i-\delta_i,\qquad R_i=|r_i|,
+ \label{eq:boxresidual}
+\end{equation}
+and let \(w_{ij}=q_{ij}-l_{ij}\) when \(r_i>0\) and
+\(w_{ij}=u_{ij}-q_{ij}\) when \(r_i<0\). These are the capacities toward
+the face that removes the residual. Lemma~\ref{lem:boxfeasible} gives
+\(0\le R_i\le\sum_jw_{ij}\).
+
+\begin{proposition}[Capacity threshold]
+\label{prop:capacity}
+For capacities \(w\in\R_{\ge0}^5\) and \(0\le R\le\bm1^{\mathsf T}w\), let
+\begin{equation}
+ \tau(w,R)=\max_{T\subsetneq\{0,\ldots,4\}}
+ \frac{R-\sum_{j\in T}w_j}{5-|T|}.
+ \label{eq:capthreshold}
+\end{equation}
+Then \(\tau\ge0\) and \(\sum_j\min\{\tau,w_j\}=R\). Consequently the
+solution of \eqref{eq:boxprojection} is
+\begin{equation}
+ \boxed{c_{ij}=q_{ij}-\operatorname{sign}(r_i)\,
+ \min\{\tau(w_i,R_i),\,w_{ij}\}.}
+ \label{eq:boxadmit}
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+For \(t\ge0\), each term \(\min\{t,w_j\}\) is the smaller of two affine
+functions of \(t\), so
+\[
+ S(t):=\sum_j\min\{t,w_j\}
+ =\min_{T\subseteq\{0,\ldots,4\}}
+ \Bigl[\sum_{j\in T}w_j+(5-|T|)\,t\Bigr].
+\]
+\(S\) is continuous and nondecreasing with \(S(0)=0\) and
+\(S(t)=\bm1^{\mathsf T}w\) for large \(t\). For a proper subset \(T\), the
+requirement that its affine form be at least \(R\) is exactly the lower
+bound on \(t\) in \eqref{eq:capthreshold}; the full subset contributes
+\(\bm1^{\mathsf T}w\ge R\) for every \(t\). Hence \(\tau\) is the least
+\(t\) with \(S(t)\ge R\), and continuity gives \(S(\tau)=R\). The empty
+subset gives \(\tau\ge R/5\ge0\). Finally, \eqref{eq:boxadmit} moves every
+coordinate of \(q_i\) toward one face by a common shift, stopped at that
+face. This is the Karush--Kuhn--Tucker form of a Euclidean projection onto
+a box intersected with a hyperplane \cite{brucker1984,condat2016}; the
+shifted point has mass \(\delta_i\) by the first part, and strict
+convexity makes it the unique solution.
+\end{proof}
+
+\begin{corollary}[Five prefix forms]
+\label{cor:prefix}
+Let \(w_{(0)}\le\cdots\le w_{(4)}\) be the ordered capacities. Then
+\begin{equation}
+ \tau(w,R)=\max_{0\le k\le4}
+ \frac{R-\sum_{m<k}w_{(m)}}{5-k}.
+ \label{eq:capprefix}
+\end{equation}
+\end{corollary}
+
+\begin{proof}
+For a fixed size \(|T|=k\) the denominator in \eqref{eq:capthreshold} is
+fixed and the numerator is largest when \(T\) holds the \(k\) smallest
+capacities.
+\end{proof}
+
+The 31 forms of \eqref{eq:capthreshold} therefore collapse to five. Five
+values are ordered by a fixed network of nine compare-exchange steps,
+which is the least possible number \cite{knuth1998}, and each step is one
+minimum and one maximum. Admission of a cell is then a fixed dataflow:
+the running minima \eqref{eq:boxruns}, ten clips, nine compare-exchanges,
+four prefix sums, four divisions by the constants \(5,4,3,2\), four
+maxima, and five capped subtractions. It contains no comparison whose
+outcome selects a path, no search over active sets, and no iteration. By
+contrast, the scalar threshold of Section~VI must locate its multiplier
+among six intervals, and it needs the ledger sign of each slot before it
+can clip.
+
+\subsection{Variation without a ledger}
+
+\begin{theorem}[Ledger-free variation bound]
+\label{thm:boxvariation}
+Let the raw current of every cell sum to its secant, and let \(c\) be
+given by \eqref{eq:boxallow}--\eqref{eq:boxadmit}. Then, in exact
+arithmetic,
+\begin{equation}
+ V((\Tcal_\square y)')\le\var(c^\flat)\le
+ \var(\delta_0,\ldots,\delta_{N-2}).
+ \label{eq:boxvardim}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+The first inequality is the Bernstein argument of
+\eqref{eq:derivative}, which uses only the synthesis. For the second,
+consider first a cell with \(\delta_i>0\). Then \([\delta_i]_-=0\) and
+\(l_{ij}=-\varrho_{ij}^-\). By \eqref{eq:boxruns}, \(H_{ij}^-\) is positive
+only while \(a_{i0},\ldots,a_{ij}\) are all negative and
+\(\delta_{i-1}<0\); \(T_{ij}^-\) is positive only while
+\(a_{ij},\ldots,a_{i4}\) are all negative and \(\delta_{i+1}<0\). These
+head and tail runs are disjoint, since a cell of negative raw currents
+cannot have positive mass. Outside them \(l_{ij}=0\), so \(q_{ij}\ge0\).
+On the head run, \(H_{ij}^-\le-a_{ij}\) gives \(a_{ij}\le l_{ij}\), so
+clipping pins \(q_{ij}=l_{ij}=-H_{ij}^-\), which is nondecreasing in
+\(j\); and \(\varrho_{ij}^+=0\) there, so \(u_{ij}\) is constant on the
+run. By \eqref{eq:boxadmit}, \(c_i\) is \(q_i\) moved by one common shift
+and stopped at the faces. A downward shift leaves the head run at its
+lower face. An upward shift raises it against a constant upper face, so
+it stays nondecreasing. In both cases the negative outputs of the head
+run form a prefix of the cell; the tail run gives a suffix by reflection;
+every other output is nonnegative. The sign pattern of a positive cell is
+therefore a negative prefix, a nonnegative middle, and a negative suffix,
+where the prefix can be present only if \(h_i^->0\) and the suffix only if
+\(t_i^->0\). A negative cell is the mirror image.
+
+Now consider a knot between cells \(i-1\) and \(i\). If both secants are
+nonzero with the same sign, \eqref{eq:boxallow} gives no opposite-sign
+allowance on either side, and no sign change is placed there. If
+\(\delta_{i-1}<0<\delta_i\), a positive suffix in cell \(i-1\) requires
+\([a_{i-1,4}]_+>[a_{i0}]_-\) and a negative prefix in cell \(i\) requires
+\([a_{i0}]_->[a_{i-1,4}]_+\). At most one of these holds, so the single
+transition of the secants is carried by at most one of the two cells or
+sits at the knot, and it is not split.
+
+A cell with \(\delta_i=0\) has \(u_{ij}=\varrho_{ij}^+\) and
+\(l_{ij}=-\varrho_{ij}^-\), so only its supported end runs can be nonzero,
+and they cannot cover the cell. If they have one sign, or only one is
+present, zero mass forces \(c_i=0\). If the head run is positive and the
+tail run negative, the outputs are nonnegative, then zero, then
+nonpositive; this is the one transition between the supporting
+neighbours \(\delta_{i-1}>0>\delta_{i+1}\), and neither neighbour can
+carry it, since each would need a nonzero \(\delta_i\) as support. In a
+run of two or more zero secants every cell lacks a supported run on at
+least one side and is therefore zero. The exterior conventions give no
+allowance at the two ends of the line.
+
+Deleting zeros, the flattened current thus changes sign only where the
+secant sequence does, and at most once for each such change.
+\end{proof}
+
+Theorem~\ref{thm:boxvariation} is an exact-arithmetic statement about
+the current ledger of one factor, as \eqref{eq:vardim} is. Floating-point
+evaluation need not preserve the sign of a vanishingly small current.
+The supporting numerical evidence is listed in the last subsection.
+
+\subsection{Continuity and compact support}
+
+\begin{proposition}[A six-sample piecewise-affine map]
+\label{prop:boxcontinuous}
+On an interior cell \(2\le i\le N-4\), the admitted current \(c_i\) of
+\(\Tcal_\square\) is a continuous piecewise-affine function of
+\((y_{i-2},\ldots,y_{i+3})\) alone. It is invariant under translation of
+the samples, positively homogeneous of degree one, odd under negation,
+and equivariant under reflection of the line. In particular it is
+globally Lipschitz.
+\end{proposition}
+
+\begin{proof}
+The raw current of cell \(i\) uses \(y_{i-2},\ldots,y_{i+3}\) by
+\eqref{eq:starfir}. The neighbouring secants \(\delta_{i\pm1}\) are
+differences of the same samples, and by \eqref{eq:sharedslope} the
+neighbouring terminal currents are \(m_i/5\) and \(m_{i+1}/5\), which
+are already in that stencil. Equations
+\eqref{eq:boxallow}--\eqref{eq:boxadmit} and \eqref{eq:capprefix}
+compose linear maps, minima, maxima and divisions by constants, each of
+which is continuous and piecewise affine. Every step commutes with
+positive scaling and ignores an added constant; negation exchanges the
+roles of \([\cdot]_+\) and \([\cdot]_-\), and reflection exchanges head
+and tail. A continuous piecewise-affine map with finitely many pieces is
+Lipschitz.
+\end{proof}
+
+This is where the two admissions differ in kind. The ledger factor is
+affine inside a chamber of fixed boundaries and clip sets, but its
+boundary selection is a discrete choice with a tie rule, and
+\eqref{eq:currentbound}--\eqref{eq:msebound} were stated without
+assuming continuity across chambers. The box factor has no discrete
+choice at all. Its two-dimensional Cartesian composition is therefore a
+continuous map of the image, and its dependence is compact: one output
+of a factor depends on the six samples of its cell, and one output of
+two factors on a \(6\times6\) block of the source at most.
+
+Lemma~\ref{lem:boxfeasible} and Proposition~\ref{prop:boxcontinuous}
+carry the earlier statements over. Cardinality, the commutation law,
+affine reproduction and cell-current conservation hold for
+\(\Tcal_\square\) by the same proofs. The smooth-cell order
+\eqref{eq:orderinterior} holds on every cell whose raw current has one
+sign, because such a cell is a fixed point. The box contains the vector
+\((\delta_i,0,0,0,0)\) used to derive \eqref{eq:currentbound}, and the
+shift in \eqref{eq:boxadmit} moves \(q_i\) by at most \(|r_i|\) in each
+coordinate, so absolute bounds of the same form follow with constants
+that we do not optimize here.
+
+\subsection{Bounded odd bubble}
+
+The quintic proposal is limited to \(O(h^5)\) by its first-derivative
+stencil, and admission removes part of it where it acts. Both losses
+have a component along one fixed function,
+\begin{equation}
+ \psi(u)=[u(1-u)]^3(2u-1),\qquad0\le u\le1,
+ \label{eq:bubble}
+\end{equation}
+which is odd about the cell centre and has a triple zero at each end.
+The enriched factor adds one amplitude per cell,
+\begin{equation}
+ (\Tcal_\square^{\psi}y)(i+u)
+ =\sum_{j=0}^{5}Q_{ij}B_j^5(u)+\omega_i\,\psi(u).
+ \label{eq:bubblesynthesis}
+\end{equation}
+Since \(\psi,\psi',\psi''\) vanish at both ends and
+\(\int_0^1\psi\,du=0\), the bubble changes no nodal value, no one-sided
+first or second derivative in
+\eqref{eq:firsttrace}--\eqref{eq:secondtrace}, and no cell mean.
+
+\paragraph{Fitted amplitude}
+On an interior cell let \(p_i\) be the quintic through the six samples
+\(y_{i-2},\ldots,y_{i+3}\), and let \(Q_i\) be the admitted quintic. The
+unconstrained amplitude is the \(L^2(0,1)\) projection of their
+difference onto \(\psi\),
+\begin{equation}
+ \widehat\omega_i
+ =\frac{\langle p_i-Q_i,\psi\rangle}{\langle\psi,\psi\rangle}.
+ \label{eq:bubblefit}
+\end{equation}
+
+\begin{proposition}[Closed form of the fit]
+\label{prop:bubblefit}
+With \(\Delta^5y_{i-2}=-y_{i-2}+5y_{i-1}-10y_i+10y_{i+1}-5y_{i+2}+y_{i+3}\),
+\begin{equation}
+ \widehat\omega_i=-\frac{41}{30}\Delta^5y_{i-2}
+ +\sum_{j=0}^{4}\kappa_j\,(a_{ij}-c_{ij}),
+ \label{eq:bubbleclosed}
+\end{equation}
+where
+\(\kappa=\bigl(35,\tfrac{175}{2},\tfrac{225}{2},\tfrac{175}{2},35\bigr)\).
+\end{proposition}
+
+\begin{proof}
+Put \(v=u(1-u)\), so that \((2u-1)^2=1-4v\) and
+\(\int_0^1v^k\,du=(k!)^2/(2k+1)!\). Then
+\(\langle\psi,\psi\rangle=\int(1-4v)v^6=1/180180\). Split
+\(p_i-Q_i=(p_i-Q_i^{\rm raw})+(Q_i^{\rm raw}-Q_i)\). The stencils
+\eqref{eq:mint}--\eqref{eq:qint} applied to a quintic return its second
+derivative exactly and its first derivative with the same error
+\(-\Delta^5y_{i-2}/30\) at both nodes. Propagating that error through the
+quintic Hermite basis gives
+\begin{equation}
+ p_i-Q_i^{\rm raw}
+ =-\frac{\Delta^5y_{i-2}}{30}\,(2u-1)\,v\,(1+3v),
+ \label{eq:bubbleleading}
+\end{equation}
+and \(\langle(2u-1)v(1+3v),\psi\rangle=41/180180\), which is the first
+term. For the second, \(Q_i^{\rm raw}-Q_i=\sum_j(a_{ij}-c_{ij})\tau_j\)
+with \(\tau_j'=5B_j^4\). The function \(-v^4/4\) is a primitive of
+\(\psi\) that vanishes at both ends, so integration by parts gives
+\(\langle\tau_j,\psi\rangle=\tfrac54\binom4j\,(j+4)!\,(8-j)!/13!\),
+and division by \(\langle\psi,\psi\rangle\) gives \(\kappa_j\).
+\end{proof}
+
+Since the two currents have the same mass, \(\kappa\) may be shifted by
+any constant; the realization uses \((0,\tfrac{63}{2},\tfrac{93}{2},
+\tfrac{63}{2},0)\) after scaling by \(3/5\), and obtains the first term
+from the raw currents through the identity
+\(a_{i0}-4a_{i1}+6a_{i2}-4a_{i3}+a_{i4}=\tfrac{5}{24}\Delta^5y_{i-2}\),
+which follows from \eqref{eq:starfir}. On the two closure cells at each
+end of a line the six-sample quintic is not available and the first term
+of \eqref{eq:bubbleclosed} is omitted.
+
+\paragraph{Sign bound}
+The derivative of \eqref{eq:bubblesynthesis} is a polynomial of degree
+six. In the degree-six Bernstein basis,
+\(\psi'=\tfrac15(-B_2^6+2B_3^6-B_4^6)\), and the elevated coefficients
+of \(5\sum_jc_{ij}B_j^4\) at those three positions are
+\begin{align}
+ d_{i2}&=\tfrac13(c_{i0}+8c_{i1}+6c_{i2}),\nonumber\\
+ d_{i3}&=c_{i1}+3c_{i2}+c_{i3},\label{eq:bubbleelevated}\\
+ d_{i4}&=\tfrac13(6c_{i2}+8c_{i3}+c_{i4}).\nonumber
+\end{align}
+The enriched coefficients are \(d_{i2}-\omega_i/5\),
+\(d_{i3}+2\omega_i/5\) and \(d_{i4}-\omega_i/5\); the other four are
+unchanged. Let \(\Omega_i\) be the set of amplitudes for which each of
+the three is zero or keeps the sign of its unenriched value. It is a
+closed interval containing zero, possibly unbounded on one side; it
+equals \(\{0\}\) when one of \(d_{i2},d_{i3},d_{i4}\) vanishes, and its
+finite ends are among \(5d_{i2}\), \(-\tfrac52d_{i3}\) and
+\(5d_{i4}\). The admitted amplitude
+is
+\begin{equation}
+ \omega_i=\arg\min_{\omega\in\Omega_i}|\omega-\widehat\omega_i|,
+ \label{eq:bubbleclamp}
+\end{equation}
+that is, one clamp, with no division.
+
+\begin{theorem}[The bubble keeps the variation bound]
+\label{thm:bubblevariation}
+For any admitted current \(c\) and amplitudes \eqref{eq:bubbleclamp},
+\begin{equation}
+ V((\Tcal_\square^{\psi}y)')\le\var(c^\flat)\le\var(\delta).
+ \label{eq:bubblevardim}
+\end{equation}
+\(\Tcal_\square^{\psi}\) is cardinal, reproduces affine data, and has the
+cell means and the one-sided nodal first and second derivatives of
+\(\Tcal_\square\).
+\end{theorem}
+
+\begin{proof}
+Degree elevation from four to six is a totally positive map of full
+column rank that keeps the first and last coefficient of each cell
+\cite{pinkus2010}. Applied cell by cell it is a direct sum of such maps,
+so the flattened elevated sequence has at most \(\var(c^\flat)\) sign
+changes. By \eqref{eq:bubbleclamp} each enriched coefficient is zero or
+keeps the sign of the elevated coefficient it replaces, and a
+coefficient that was zero stays zero; replacing entries of a sequence by
+zero cannot add a sign change. Total positivity of the degree-six
+Bernstein basis bounds the variation of the derivative inside each cell
+by that of its coefficients, and at a knot the one-sided signs come from
+the terminal coefficients, which are unchanged. This gives the first
+inequality; the second is Theorem~\ref{thm:boxvariation}. For affine
+data \(\Delta^5y=0\) and \(a_i=c_i\), so \(\widehat\omega_i=0\). The
+remaining claims were noted below \eqref{eq:bubblesynthesis}.
+\end{proof}
+
+\begin{proposition}[Leading-error reduction]
+\label{prop:bubblegain}
+On an interior cell whose raw current is admitted unchanged and whose
+fitted amplitude lies in \(\Omega_i\), the bubble removes the fraction
+\begin{equation}
+ \frac{41^2\,\langle\psi,\psi\rangle}
+ {\norm{(2u-1)v(1+3v)}_{L^2}^2}
+ =\frac{1681}{1950}\approx86.2\%
+ \label{eq:bubblegain}
+\end{equation}
+of the \(L^2\) energy of the leading error \eqref{eq:bubbleleading}. The
+root-mean-square leading error is multiplied by
+\(\sqrt{269/1950}\approx0.371\). The order \(O(h^5)\) is unchanged.
+\end{proposition}
+
+\begin{proof}
+\(\norm{(2u-1)v(1+3v)}^2=\int(1-4v)v^2(1+3v)^2\,du=5/462\). An
+orthogonal projection onto one direction removes the squared projection
+coefficient times \(\langle\psi,\psi\rangle\), and
+\(41^2/180180\) divided by \(5/462\) is \(1681/1950\). For
+\(f\in C^6\), \eqref{eq:bubbleleading} with \(\Delta^5y=h^5f^{(5)}+O(h^6)\)
+is the leading term of the smooth-cell error.
+\end{proof}
+
+For pixel-area sampling the bubble adds no quadrature: on a clipped
+interval \([t,u]\) of a cell,
+\(\int_t^u\psi=\tfrac14\bigl([t(1-t)]^4-[u(1-u)]^4\bigr)\), so each
+basin weight gains one closed-form term.
+
+\subsection{Lockstep streaming}
+
+Proposition~\ref{prop:boxcontinuous} changes the schedule of a factor.
+The ledger factor needs a whole line before any cell can be admitted,
+because a boundary may depend on a sign witnessed arbitrarily far to the
+left. The box factor can admit cell \(i\) as soon as node \(i+3\) has
+arrived. All lines of a factor then advance together, one node at a
+time: the vector lanes are the independent lines and channels, the five
+currents of a cell are array slots, and no lane takes a path that
+another does not. The second factor consumes finished rows of the first
+through a ring of a fixed number of rows, so the factor barrier of
+Section~VIII becomes a bounded delay in place of a stored intermediate
+image, and working storage is proportional to one image dimension
+rather than to the image. The realization measured below keeps a short
+fixed window of nodes per line. The two factors remain ordered, and the second
+still analyzes the values produced by the first; nothing here commutes
+them.
+
+Since \eqref{eq:boxallow}--\eqref{eq:boxadmit} contain only operations
+that are correctly rounded and deterministic in IEEE arithmetic, and
+contraction into fused multiply-adds is disabled, scalar, 128-bit and
+256-bit evaluations of the same kernel return identical bits on finite
+data. The scalar form is therefore an exact reference for every vector
+form.
+
+For point evaluation of a compiled two-dimensional atlas, two exact
+reductions are selected once for each query or row segment, outside the
+arithmetic loops: on a source grid line the 36-control tensor quintic
+reduces to one six-control curve, and at a source node to a single
+control.
+
+\subsection{Measured cost and accuracy}
+
+Table~\ref{tab:boxcost} compares the two admissions inside otherwise
+matched native code: the ledger realization of Section~VIII, including
+the recurrence \eqref{eq:ledgerrecurrence} and the six-interval
+threshold, against the streaming box realization without the bubble.
+The host is an Apple M4 with LLVM 22.1.8 at \texttt{-O3}, no fast-math
+and no contraction. Both sides run on one thread, reuse prepared plans
+and workspaces, and resize four interleaved binary32 channels with
+nodal sampling. Each entry is the median of seven timings taken in
+rotating order after one discarded pass.
+
+\begin{table}[H]
+\caption{One-thread resize time (ms), ledger / box admission}
+\label{tab:boxcost}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{l|rr|rr|rr}
+\hline
+ & \multicolumn{2}{c|}{$512{\times}384$}
+ & \multicolumn{2}{c|}{$512{\times}384$}
+ & \multicolumn{2}{c}{$1024{\times}768$}\\
+ & \multicolumn{2}{c|}{to $237{\times}181$}
+ & \multicolumn{2}{c|}{to $769{\times}577$}
+ & \multicolumn{2}{c}{to $256{\times}192$}\\
+Input & ledger & box & ledger & box & ledger & box\\
+\hline
+Checkerboard & 52.83 & 6.80 & 94.85 & 12.13 & 209.76 & 29.05\\
+Noise        & 37.40 & 7.81 & 58.28 & 11.64 & 130.97 & 28.63\\
+Integer ties & 33.23 & 6.93 & 62.98 & 12.62 & 132.26 & 27.37\\
+Plateaus     & 21.76 & 7.41 & 33.46 & 11.78 &  72.62 & 25.53\\
+Gradient     & 14.52 & 7.42 & 30.12 & 13.00 &  64.09 & 27.80\\
+Smooth       & 14.32 & 6.86 & 30.53 & 13.01 &  54.60 & 27.79\\
+Constant     &  5.52 & 7.73 &  8.63 & 12.53 &  18.47 & 27.05\\
+\hline
+\end{tabular}
+\end{table}
+
+Two things are visible. First, the box time does not depend on the
+image: across the seven inputs it varies by about fifteen percent,
+while the ledger time varies by a factor of ten, because its work
+follows the number of observed transitions. Second, the box is faster
+wherever there is anything to admit, by 1.96 to 7.82 times on the
+non-constant inputs, with a median of 3.76; a repeated run gave 2.00 to
+8.12. On a constant image the ledger has nothing to do and is the
+faster of the two, at 0.68 to 0.71 of the box time. The same kernels
+evaluated without vector instructions take 2.6 to 3.2 times as long as
+the 128-bit form in binary32, so most of the gain on smooth inputs
+comes from the lanes that a ledger-free cell makes available. In
+binary64, where a 128-bit group holds two lanes instead of four, the
+speedup on non-constant inputs is 1.05 to 4.22 with median 1.97. On an
+x86-64 host, 256-bit lane groups run the admission kernel in 0.43
+(binary32) and 0.45 (binary64) of the 128-bit time. Working storage for
+the first shape is 407{,}360 bytes in binary32.
+
+These are measurements of one implementation on the named hosts. The
+ledger baseline is itself the faster of the two ledger realizations
+available to us: in a separate binary64 measurement on the same M4 it
+ran 1.81 to 4.14 times faster than the reference implementation it
+replaced. In a complete application with its existing worker pool, a
+\(512\to256\) RGBA resize fell from 12.90 to 6.68\,ms when the box
+stream with bubble replaced that application's own ledger resize.
+
+Table~\ref{tab:boxcensus} applies a held-out census of the same form as
+Section~XI to the Cartesian factor alone, without the Eikonal blend.
+Its generators were re-created for this comparison, so the table
+compares the two admissions on identical inputs and its absolute values
+are not those of Section~XI. The high-resolution accuracy of the ledger
+factor is retained to the digits shown, and the coarsest
+two-dimensional aggregate is 0.36\% worse.
+
+\begin{table}[H]
+\caption{Geometric-mean held-out MSE, Cartesian factor}
+\label{tab:boxcensus}
+\centering
+\scriptsize
+\begin{tabular}{l|cc}
+\hline
+Cases & Ledger & Box\\
+\hline
+1-D, $N=17$  & $6.876406\times10^{-7}$  & $6.876402\times10^{-7}$\\
+1-D, $N=33$  & $5.486885\times10^{-10}$ & $5.486855\times10^{-10}$\\
+1-D, $N=65$  & $2.205408\times10^{-13}$ & $2.205408\times10^{-13}$\\
+1-D, $N=129$ & $6.378444\times10^{-17}$ & $6.378444\times10^{-17}$\\
+2-D, side 17 & $4.907517\times10^{-5}$  & $4.925227\times10^{-5}$\\
+2-D, side 33 & $3.771333\times10^{-7}$  & $3.771333\times10^{-7}$\\
+\hline
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:bubblegain} measures the bubble on five analytic
+profiles on \([0,1]\): \(\sin2\pi x\), \(\sin(6\pi x+0.3)\),
+\(e^{-40(x-0.47)^2}\), \(\tanh8(x-0.53)\) and \(1/(1+25(x-0.5)^2)\).
+Each is sampled at \(N\) nodes and evaluated at eightfold refinement;
+nodes and the three cells at each end are excluded. On an exactly
+quintic input the measured energy ratio is 0.137949, against
+\(269/1950=0.137949\) from Proposition~\ref{prop:bubblegain}, and the
+table approaches the predicted factor 0.371 as the profiles become
+resolved.
+
+\begin{table}[H]
+\caption{Geometric-mean RMS error with and without the bubble}
+\label{tab:bubblegain}
+\centering
+\scriptsize
+\begin{tabular}{r|ccc}
+\hline
+$N$ & Box & Box with bubble & Ratio\\
+\hline
+17  & $5.417\times10^{-4}$ & $4.308\times10^{-4}$ & 0.795\\
+33  & $1.502\times10^{-5}$ & $9.227\times10^{-6}$ & 0.614\\
+65  & $4.311\times10^{-7}$ & $2.040\times10^{-7}$ & 0.473\\
+129 & $1.307\times10^{-8}$ & $5.248\times10^{-9}$ & 0.402\\
+\hline
+\end{tabular}
+\end{table}
+
+The numerical support for Theorem~\ref{thm:boxvariation} and
+Proposition~\ref{prop:capacity} is as follows. In exact rational
+arithmetic, 10{,}000 arbitrary feasible boxes satisfy the mass, the
+bounds and the optimality conditions of \eqref{eq:boxprojection}, and
+2{,}000 arbitrary eight-cell ledgers, one third with zero-mass cells,
+show no surplus sign change. In binary64, 53{,}000 lines of noise,
+integer ties, random walks with flats, sinusoids, mixed magnitudes,
+sparse impulses and image rows show no surplus sign change above a
+\(10^{-13}\) cutoff, with scaled mass error at most
+\(7.6\times10^{-16}\); the five-form threshold agrees with the 31-form
+maximum to \(8.9\times10^{-16}\) on 20{,}000 capacity sets, and 3{,}000
+lines with the bubble show no surplus sign change of the sampled
+derivative. The projection of the unclipped proposal fails the first
+battery once in 3{,}000 lines, with a surplus of two. The native
+kernels return identical bits in their scalar and vector forms on
+2{,}112 resize cases, and match an independent array model of the
+bubble-free stream bit for bit.
+
+\subsection{Scope}
+
+The box admission is a second admitted operator, not a faster evaluation
+of the first. Where the raw proposal changes sign inside a cell, the
+ledger factor returns the Euclidean projection onto the signed fibre
+\eqref{eq:fibre}, and the fixed-ledger contraction \eqref{eq:firm}
+belongs to that projection; the box factor returns a different current
+with the same mass and the same variation bound, and in exchange is
+continuous in the data. The moment-polytope statements of Section~IX
+were derived for the signed fibre and are not re-derived here. The
+retained-detail inversion of that section uses only that the predictor
+is a deterministic function of the coarse state, and so holds for either
+admission. The measurements above concern the fixed-order Cartesian
+composition; the Eikonal blend \eqref{eq:witnessedblend} may use the box
+factor in both orders, but that combination has not been measured.
+Bubble enrichment of the joint warp atlas of the appendices is not
+implied by the one-dimensional construction and is not claimed.
+% END LEDGER-FREE ADMISSION
+
 
 \section{Inversion in Conventional Resampling}
 \enlargethispage{2\baselineskip}
@@ -2645,7 +3340,10 @@ admission restricts its derivative-sign lineage before Bernstein synthesis,
 and a source-derived Riemannian coordinate couples the two Cartesian factor
 orders. The same representation yields arbitrary-scale basin reduction,
 exact residual-moment lifting, and the FIR/polyphase realization
-CONV$^{*}$.
+CONV$^{*}$. A second admission, built from a neighbour box in place of the
+sign ledger, keeps the variation bound, conservation and cardinality
+while making each factor a continuous six-sample operator with a fixed
+dataflow.
 
 The analysis establishes cardinality, affine reproduction, cell-current
 conservation, factorwise variation diminution, fixed-ledger nonexpansiveness,
@@ -2655,7 +3353,12 @@ restriction. The deterministic synthetic results confirm the predicted sign
 topology and rapid resolved-field convergence; matched-cycle comparisons show
 competitive fidelity with substantially smaller range excursion than
 Lanczos on the selected diagonal interface, while native timings identify
-the remaining cost of nonlinear admission and the Cartesian factor barrier.
+the cost of ledger admission and the Cartesian factor barrier. The
+ledger-free admission removes most of that cost: on one thread it is
+1.96 to 7.82 times faster than the ledger form on every non-constant
+test input, its time is independent of the image, and the barrier
+reduces to a ring of rows. Its bounded bubble multiplies the leading
+smooth-cell error by 0.371 in the root-mean-square sense.
 
 Appendix~\ref{app:directwarp} develops the joint two-dimensional current
 admission required for direct affine and projective warps, extending the
@@ -3805,7 +4508,7 @@ continuous source field and its conservative target functional.
 \section*{AI GENERATED WORK DISCLAIMER}
 
 Substantial portions of this work were generated with the assistance of
-OpenAI Codex general reasoning models.
+OpenAI Codex general reasoning models and Anthropic Claude models.
 
 \begin{thebibliography}{99}
 \scriptsize
@@ -3902,5 +4605,16 @@ doi: 10.1137/S0036141095289051.
 \bibitem{gilbargtrudinger2001}
 D. Gilbarg and N. S. Trudinger, \emph{Elliptic Partial Differential Equations
 of Second Order}. Berlin, Germany: Springer, 2001.
+\bibitem{brucker1984}
+P. Brucker, "An $O(n)$ algorithm for quadratic knapsack problems,"
+\emph{Oper. Res. Lett.}, vol. 3, no. 3, pp. 163--166, Aug. 1984,
+doi: 10.1016/0167-6377(84)90010-5.
+\bibitem{condat2016}
+L. Condat, "Fast projection onto the simplex and the $\ell_1$ ball,"
+\emph{Math. Program.}, vol. 158, no. 1--2, pp. 575--585, 2016,
+doi: 10.1007/s10107-015-0946-6.
+\bibitem{knuth1998}
+D. E. Knuth, \emph{The Art of Computer Programming, Volume 3: Sorting
+and Searching}, 2nd ed. Reading, MA, USA: Addison-Wesley, 1998.
 \end{thebibliography}
 \end{document}
