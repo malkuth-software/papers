@@ -1,3 +1,3 @@
 Zenodo has become unreliable, so i am sharing copies of my work here
 
-[Self-Hashing Certificates for Exact Integrity of Chunked Files (PDF)](chunked-self-hashing-certificates.pdf) · [TeX source](chunked-self-hashing-certificates.tex)
+[Progressive Verification with 64-Byte Self-Hashing Certificates (PDF)](progressive-certificates-64.pdf) · [TeX source](progressive-certificates-64.tex)

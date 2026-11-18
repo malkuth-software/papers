@@ -1,0 +1,237 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[margin=0.72in,columnsep=0.26in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,microtype,hyperref,balance}
+\hypersetup{hidelinks,pdftitle={Progressive verification with 64-byte self-hashing certificates}}
+\newtheorem{prop}{Proposition}
+\newcommand{\cat}{\mathbin\Vert}
+\newcommand{\xor}{\mathbin\oplus}
+\newcommand{\bits}{\{0,1\}}
+\DeclareMathOperator{\wt}{wt}
+\DeclareMathOperator{\rank}{rank}
+\raggedbottom
+\setlength{\emergencystretch}{0.8em}
+\title{\vspace{-2em}\bfseries Progressive Verification with 64-Byte Self-Hashing Certificates}
+\author{\normalsize Malkuth Software Research Note}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+A fixed-width trusted value can identify selected files exactly and authenticate other files under a collision-resistance assumption. We examine a proposed permutation-based self-hash and prove a structural obstruction when its exact addresses fill a binary subspace. We construct an alternative in which each exact address has one preimage among all physical files. An enumerative encoder fills a bank of \(2^{504}\) such addresses with short strings and files described by a sparse first chunk and sparse changes between chunks. A second predictor represents changes between adjacent bits. We bound exact coverage for arbitrary sources in terms of min-entropy and Shannon entropy deficiency. For general certificates we reduce false file acceptance and false chunk openings to a framed tree collision or a collision in range finalization, and give an explicit adaptive random-oracle bound. Their decoders yield expected chunks before the payload arrives. A separate tree commitment permits progressive authentication of general files with untrusted proofs. At one gibibyte the exact family covers every repetition of a one-mebibyte bitmap with 24 set bits, or every such bitmap with 22 set bits and one subsequent change at any bit position. At that length the direct bank can cover at most all seeds of weights 25 and 23, respectively, under those two change budgets. Independent Python and JavaScript encoders reproduce the same 64-byte certificates.
+\end{abstract}
+
+\section{What the trailer certifies}
+Let \(G(P)\) be a 512-bit payload commitment and \(H\) a function of all physical bytes. A sealed file is \(P\cat G(P)\). We distinguish three statements. First, each \(P\) has exactly one trailer \(t\) satisfying \(H(P\cat t)=t\). Second, each trusted \emph{exact} address has exactly one physical preimage. Third, finding distinct general files accepted under the same certificate should require cryptographic work. Only the third statement calls for a computational hypothesis. An external trusted copy of the certificate is available to a verifier who authenticates data during receipt. With the trailer supplied only at EOF, earlier computations can be accumulated and checked at EOF.
+
+For the proposed wrapper \(H_g(t)=t\xor E(t\xor g)\xor E(0)\), injectivity of \(E\) gives \(H_g(t)=t\) exactly when \(t=g\). This result holds at either width. The behavior away from the fixed point follows from a second identity. With \(x=t\xor g\) and \(d(x)=x\xor E(x)\xor E(0)\),
+\[
+                     H_g(g\xor x)=g\xor d(x).
+\]
+
+\begin{prop}
+Suppose a binary subspace \(S\) of codimension \(b\) is filled by reversible, distinct payload commitments. For each fixed discrepancy \(x\), the wrapper's image over these commitments is the coset \(S\xor d(x)\). Among \(2^b+1\) distinct discrepancies, two give identical image sets.
+\end{prop}
+\begin{proof}
+Translation is a bijection from \(S\) onto the indicated coset. The quotient by \(S\) contains exactly \(2^b\) elements. Preimages from different discrepancy layers are physically distinct since identical payload and trailer determine \(x\).
+\end{proof}
+In the half-space proposal, three discrepancies suffice. This is a statement about complete-file collision resistance under a filled, publicly decodable bank. The argument leaves the fixed-point theorem intact. A substantially different permutation cannot change the quotient count.
+
+\section{Singleton preimages of the file hash}
+Interpret the 64 bytes as an unsigned big-endian integer. Leading \texttt{00} designates the direct exact bank \([0,K)\), \(K=2^{504}\). Leading \texttt{01} designates the spatial predictor, using the same ordinal range after its tag. Leading bytes \texttt{02} through \texttt{FE} designate the general interval \(J=[2K,255K)\). Leading \texttt{FF} is reserved. The common profile fixes the chunk size, predictors and codebook. Every direct-bank ordinal is used. The second bank reserves aliases as specified below. Write \(D=|J|=253K\).
+
+For an exact payload \(P\), \(G(P)\) is its tagged canonical ordinal. Otherwise \(G(P)\) is the general commitment of Section~\ref{sec:tree}. Define \(H(P\cat t)\) to return \(g=G(P)\) when \(t=g\). In every other case, map the separately framed pair \((g,t)\) into the ordered set \(J\setminus\{t\}\). A file shorter than 64 bytes maps directly into \(J\) under a separate domain. For a finite target set of size \(d\), obtain a 1024-bit integer \(z\) from two domain-separated SHA3-512 outputs and return the element at zero-based position \(\lfloor zd/2^{1024}\rfloor\). This operation has fixed running length and excludes the supplied trailer by construction.
+
+\begin{prop}
+Every payload has one self-hashing trailer. For any issued exact address \(h\), writing \(P_h\) for its decoded payload gives
+\[
+                H(F)=h \quad\Longleftrightarrow\quad F=P_h\cat h .
+\]
+\end{prop}
+\begin{proof}
+The unequal branch always differs from \(t\). It and the short-file rule land in \(J\). An exact output therefore forces equality of the supplied and recomputed trailers, and the inverse of the exact codebook fixes the payload. The converse follows by evaluation.
+\end{proof}
+
+For a general certificate, acceptance requires equality of the trusted, embedded and recomputed values. Section~\ref{sec:auth} analyzes this protocol for SHA3-512~\cite{nist} and its ideal-function model.
+
+\section{An exact family of changes across chunks}
+Let \(B=2^{20}\) bytes. In the first chunk record the set bits. For every subsequent byte at position \(j\ge B\), record the set bits of \(P_j\xor P_{j-B}\). The final partial chunk uses the same byte rule. Bit indices increase from the low to the high bit within each byte. Write \(n=|P|\), \(w\) for the first set's size and \(v\) for the number of subsequent changes. For a given \((n,w,v)\) the exact number of files is
+\begin{align}
+ U_n&=8\min(n,B),\qquad V_n=8\max(n-B,0),\nonumber\\
+ A(n,w,v)&=\binom{U_n}{w}\binom{V_n}{v}. \label{eq:count}
+\end{align}
+The two sets can be chosen independently. The inverse copies the preceding chunk and toggles the designated positions. A single change can persist for every subsequent chunk. Encoding its position once therefore certifies many changed physical bytes. Repeating an unrestricted dense chunk spans \(2^{8B}\) seeds even at a fixed repeat count. At most \(2^{512}\) members can have distinct 64-byte certificates.
+
+\paragraph{Allocation criterion.}
+There is no distribution-independent ordering by usefulness. Here is one explicit optimization problem. Give every string up to 62 bytes exact coverage as a hard constraint. For lengths \(63\le n<2^{64}\) and \(w+v\le32\), group the remaining candidates into cells by dyadic byte-length band \(b=\lfloor\log_2 n\rfloor\), layout (shorter than a chunk, chunk-aligned, or unaligned), and \((w,v)\). Give equal probability to each nonempty cell and equal probability to each member within it. The cell model treats seed complexity, change complexity, alignment, and length scale as distinct workload characteristics. It is a declared prior whose predictive accuracy depends on the workload.
+
+A cell of cardinality \(a\) gives each member mass proportional to \(1/a\). Assign the remaining addresses to cells in increasing \(a\), taking a prefix of the last cell to exhaust the bank. This maximizes exact probability under the specified prior: exchanging a selected member of lower mass for an unselected member of greater mass increases coverage. Ties are broken by the lexicographic tuple \((b,\mathrm{layout},w,v)\) in the layout order given above. The default table occupies 14,073 cells counting the partially admitted cell. Larger lengths and shapes excluded by both predictors receive the general commitment.
+
+\paragraph{Rank and inverse.}
+The mandatory literals use length order followed by big-endian byte order. Within a cell, order first by \(n\), then by the colex ranks \(q_0,q_1\) of the two sets. The colex rank of \(s_1<\cdots<s_k\) is \(\sum_i\binom{s_i}{i}\), an instance of enumerative source coding~\cite{cover}. The ordinal within a cell equals
+\[
+ \sum_{\substack{l<n\\ l\text{ in cell layout and band}}} A(l,w,v)
+      +q_0\binom{V_n}{v}+q_1 .
+\]
+Inversion finds \(n\) by binary search in cumulative cardinalities, divides the remainder into the two ranks, and unpacks their positions. Thus arbitrary finite inputs can be classified in one pass while the exact certificate determines its own length and changes.
+
+Enumerating a band of up to \(2^{63}\) lengths is unnecessary. For \(p(i)=\binom{si}{k}\), the forward-difference formula gives
+\[
+ \sum_{i=0}^{t-1}p(i)
+     =\sum_{j=0}^{k}(\Delta^j p)(0)\binom{t}{j+1}.
+\]
+Use stride \(s=8\) for byte steps and \(s=8B\) for aligned lengths. Subtract aligned counts to obtain unaligned counts. For \(n\ge B\) the seed factor is constant. An encoder retains one preceding chunk and at most 32 set positions. Once the weight budget is exceeded the exact candidate can be discarded. The cryptographic tree is accumulated concurrently.
+
+\paragraph{Spatial predictor.}
+Let \(T(P)_j=P_j\xor P_{j-1}\) for bit indices \(j\) in file order, with \(P_{-1}=0\). Within each byte count the low bit first. Given \(T(P)\), prefix parity recovers the bits of \(P\). A long interval of consecutive ones contributes events only at its endpoints. Feed \(T(P)\) to a second copy of the same lag encoder. Use the direct ordinal whenever available, and issue a spatial ordinal only when the direct encoder excludes \(P\). On decoding a spatial address, invert \(T\) and check this rule. The second bank has exactly \(|T^{-1}S\setminus S|\) issued ordinals for direct payload family \(S\). Addresses for overlaps have no physical preimage. Thus adding a predictor preserves every direct guarantee. A single carried bit suffices across chunk boundaries in either direction.
+
+\subsection{Information required for exact coverage}
+Fix a payload length \(n\) and let \(C_n\) be the union of the two issued exact families at that length. Write \(c_n=|C_n|\) and \(N_n=2^{8n}\). With \(S_n\) the direct family, the spatial transform is a length-preserving bijection and gives
+\[
+ c_n=2|S_n|-|S_n\cap T^{-1}S_n|.
+\]
+The direct count is determined by the allocation. For each allocated cell containing length \(n\), let \(a\) be its retained count and \(b_n\) its full count at earlier eligible lengths. Its contribution is \(\min\{A(n,w,v),\max(0,a-b_n)\}\). For a literal length \(n\le62\), \(c_n=N_n\). For \(n\ge2^{64}\), \(c_n=0\). Across all lengths \(\sum_n c_n\le2K\), since each exact bank has \(K\) ordinals.
+\begin{prop}[Coverage and entropy]
+For a source \(X\) on \(n\)-byte strings, put \(p=\Pr[X\in C_n]\), \(u=c_n/N_n\), and use base-two logarithms. Then
+\begin{align}
+ p&\le\min\{1,c_n2^{-H_\infty(X)}\},\label{eq:minent}\\
+ 8n-H(X)&\ge d_{\rm bin}(p\Vert u),\label{eq:kl}
+\end{align}
+where \(H_\infty(X)=-\log_2\max_x\Pr[X=x]\) and \(d_{\rm bin}(p\Vert u)=p\log_2(p/u)+(1-p)\log_2((1-p)/(1-u))\), with the usual endpoint limits.
+\end{prop}
+\begin{proof}
+Sum the largest point-mass bound over the \(c_n\) admitted strings. For the second inequality condition on the indicator of exact admission. The chain rule bounds entropy above by \(h_2(p)+p\log_2 c_n+(1-p)\log_2(N_n-c_n)\), where \(h_2\) denotes binary entropy. Rearrangement gives (\ref{eq:kl}). Equality holds when the conditional distributions on each occupied part are uniform. A uniform source has exact probability precisely \(u\).
+\end{proof}
+For an arbitrary family of \(a\) strings to have full coverage in a dedicated \(k\)-bit bank it is necessary and sufficient that \(\log_2 a\le k\): distinct members need different ordinals, and ranking them attains the bound. For a known source and a freely selectable bank of size \(L\), the largest attainable exact probability equals the sum of the \(L\) largest point masses, since exchanging a lower mass for a higher one can only increase coverage. The implemented family also pays for length, shape and canonicality. Low entropy alone cannot guarantee admission to a particular codebook: even a point mass can lie outside it.
+
+For the one-GiB shape with \(w=22,v=1\), \(\log_2 A=469.0694\) bits, or \(5.461\times10^{-8}\) of its \(8{,}589{,}934{,}592\) raw bit positions in information units. This is the entropy of the uniform distribution on that shape. A direct ordinal has 504 available bits and the allocated cell includes every such placement. Increasing the weight to 24 gives \(505.9609\) bits even with length and change count known, exceeding the entire direct bank. For coverage of every member, (\ref{eq:kl}) reduces to \(8n-H(X)\ge 8n-\log_2 c_n\). These statements concern information and authentication; the exact inverse intentionally makes the represented data recoverable.
+
+\section{Local discrepancy and progressive evidence}
+Given a trusted exact ordinal, the verifier decodes \(n\), the seed positions and the change positions before reading any payload. For expected chunk \(a_i\) and received chunk \(p_i\) of the required length set \(e_i=p_i\xor a_i\). Compute a Boolean OR of the predicates \(e_i\ne0\), rejecting a length error separately. The OR vanishes exactly when every received chunk agrees. Earlier discrepancies cannot cancel. Exact verification can stop at the first differing chunk and locate the differing byte. Completion also requires the expected end of input. This local test carries no per-chunk certificate bytes.
+
+\paragraph{General files.}\label{sec:tree}
+Use the binary-tree shape of RFC 9162~\cite{rfc}, splitting a subtree of \(m>1\) leaves at the largest power of two strictly less than \(m\). Leaves bind zero-based position and chunk bytes. Internal nodes bind ordered 512-bit children. Separate domains identify the empty tree and the final pair (payload length, tree root). The final pair maps into \(J\). A streaming stack of \(O(\log m)\) hashes suffices to build the root. SHA3-derived parallel hashing has standardized precedents~\cite{sp185}; our framing and tree have their own profile.
+
+A verifier with only the final trusted general certificate can recompute it in one pass. Verifying an individual chunk before EOF additionally uses a sibling path and length. The verifier recomputes the final general value and compares it with the trusted certificate. In a balanced \(m\)-leaf tree a path costs up to \(64\lceil\log_2m\rceil\) bytes. Sibling paths are untrusted and need not be attached to the file. For ordered delivery one may send a right-child digest once at each internal split. The recipient checks the first leaf against the pending ancestors and subsequently reuses authenticated sibling values. Traversing the full tree sends \(m-1\) digests in this schedule, with \(O(\log m)\) pending values. Grouping leaves moves authentication to the end of each group and reduces witness traffic. The reference tests independent paths; the shared traversal is an analytical schedule.
+
+\paragraph{What a witness buys.}
+For an ideal map into \(D\) general values, fix a prefix and \(s\) distinct possible completions, independent of the trusted target. The probability that at least one completion matches that target is \(1-(1-1/D)^s\). For \(s\gg D\) a prefix can remain mathematically consistent with the target despite being unrelated to the original file. This model explains why a rolling state alone gives little evidence for early rejection. A tree path supplies a checkable constraint on the actual continuation. Putting a 256-bit prefix check and a 256-bit final check in the 64 bytes has a separate cost: among messages sharing the checked prefix only the final 256 bits distinguish suffixes, giving a generic ideal birthday scale of \(2^{128}\) on that subset.
+
+\section{Authentication reduction}\label{sec:auth}
+The trusted object is an association between an object identifier and an honestly issued \(h=G(P)\). Give an adaptive adversary the payloads, their certificates, honest paths, and access to the public hash. It may choose any finite collection of payloads for issuance, including after earlier queries. It wins by choosing an issued object and obtaining either of the following acceptances:
+\begin{itemize}
+\item A complete file different from \(P\cat h\). The verifier checks its length is at least 64, its trailing 64 bytes equal the trusted \(h\), and its payload recomputes to \(h\).
+\item A false chunk statement for that object. The request specifies position \(i\). The accepted statement asserts length \(n\) and chunk bytes \(p\), where \(n\ne |P|\) or \(p\) differs from the genuine chunk at \(i\). The verifier binds the request's position, checks the index range, expected chunk length and entire proof shape, and compares the computed general value with \(h\). Exact addresses use their decoder and compare the requested coordinates directly.
+\end{itemize}
+A stream advertised as a complete object must additionally cover positions in order from zero through the prescribed last chunk, check EOF and check its trailer. Individual chunk acceptance attests only to the claimed coordinates. A cached sibling used for subsequent descent is trusted only after its path to the issued root has passed, with its interval and object identity retained.
+
+Write \(L_i(p)\) for the framed leaf hash, \(N(a,b)\) for the ordered node hash, and \(R(n,u)\in J\) for the role-4 finalization of root \(u\). Define two collision problems: equal 512-bit outputs on distinct framed tree inputs (roles 1--3), and equal \(R\) values on distinct pairs \((n,u)\). These problems refer to the wire functions of Section~\ref{sec:wire}.
+\begin{prop}[Extraction]
+An accepting forgery for an issued general certificate yields a witness for at least one of these two collision problems. An issued exact certificate admits neither type of authentication forgery.
+\end{prop}
+\begin{proof}
+For a general target record the honest tree and final pair. Recompute the accepting pair using the offered file or path. Unequal final pairs with the same certificate give a finalization collision. Otherwise length and root agree. In the file game the trailer equals the trusted one, so a wrong file of this length has a differing chunk. Compare the honest path at that index with the path in the offered tree. In the chunk game compare the honest path at the requested index with the supplied computation, treating supplied siblings simply as 64-byte values. Length fixes both the topology and the directions. Starting with the equal roots, unequal ordered child inputs yielding the same parent give a tree collision. If child inputs agree, descend to the designated child, whose digest agrees. Equal leaf digests on different chunk bytes give a leaf collision. A one-leaf tree starts at this last step. An empty object has no valid chunk request. Induction applies the same comparison to a previously authenticated interval. For an exact address its canonical inverse fixes the length and every byte. The verifier checks those values and, for a whole file, the trailer.\end{proof}
+The extractor runs the adversary once, retains or rebuilds the honest target tree and compares at most one root-to-leaf path after hashing a submitted full file. Thus for fixed primitives the forgery advantage is bounded by the sum of the advantages for the two extracted collision problems at these costs. A collision in the range map can involve distinct SHA3 outputs. Concrete collision resistance of SHA3-512 alone does not discharge that second assumption.
+
+\begin{prop}[Random-oracle bound]
+Model SHA3-512 as one random function from byte strings to 512 bits. Let \(q_T\) bound the number of distinct framed tree inputs evaluated and \(q_R\) the number of distinct role-4 pairs touched, counting issuance, the adversary, and verification of all attempts. Put \(M=2^{1024}\) and \(\rho=\lceil M/D\rceil/M\). For adaptive, classical interaction,
+\[
+ \Pr[\mathrm{win}]\le
+ \min\!\left\{1,\binom{q_T}{2}2^{-512}
+                   +\binom{q_R}{2}\rho\right\}.
+\]
+\end{prop}
+\begin{proof}
+The framing separates roles, fields, and counter bytes injectively. At each fresh tree input, the oracle answer is uniform, so its chance of matching any of \(j\) previous tree answers is at most \(j/2^{512}\). At the first query to \emph{either} counter for a new valid final pair, sample both independent outputs and store them, revealing only the requested answer. This has the same transcript distribution even for an adversary selecting pairs after inspecting individual halves. The concatenation is uniform on \([0,M)\). Every interval selected by multiply-and-floor contains at most \(\lceil M/D\rceil\) integers, giving collision probability at most \(j\rho\) against \(j\) earlier pairs at first touch. Queries outside these domains can be answered independently. Summing the conditional bounds and applying extraction proves the claim.\end{proof}
+The bound covers multiple targets and attempts under the total query budgets. It is a birthday bound, including for adversarially selected targets. For a catalog authenticated by another mechanism, add the probability of accepting a false catalog binding. The theorem assumes the intended object and trusted certificate are associated before verification. Algorithms using the whole-file hash with the additional trailer equality implement the same acceptance predicate because its unequal branch excludes the supplied trailer.
+
+\section{Capacity and implementation checks}
+\begin{table}[ht]
+\centering\small
+\caption{Largest seed weight with all placements covered, followed in parentheses by the single-shape ceiling from (\ref{eq:count}) for the direct \(2^{504}\) bank.}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Length & \(v=0\)&\(v=1\)&\(v=3\)&\(v=8\)\\
+\midrule
+1 GiB & 24 (25)&22 (23)&19 (20)&11 (12)\\
+1 GiB + 7 B & 23 (25)&21 (23)&18 (20)&10 (12)\\
+1 TiB & 24 (25)&21 (23)&17 (18)&6 (8)\\
+1 PiB & 23 (25)&20 (22)&15 (17)&2 (4)\\
+\bottomrule
+\end{tabular}
+\end{table}
+For example, at one GiB with one subsequent change, the family contains every choice of 22 seed positions and every choice of the changed bit and transition time. Dedicating the entire direct bank to that length and change count would cover all 23-position seeds. All 24-position seeds exceed that capacity. The difference of one measures the price of sharing the bank over other sizes and patterns. The table gives counts, including for pebibyte files, by integer arithmetic. It does not require generating files of those sizes.
+
+The companion Python reference implements ordinal assignment and recovery, local verification, ordered tree construction, path verification, the whole-file function, and the range map. On an Apple M4 the reduced profile inverted all 4,096 addresses and classified all 65,793 strings of length at most two. The default profile checked rank boundaries and sampled 504-bit ordinals, localized a changed byte at offset 2,097,159, and checked 45 authentication paths for trees with one through nine leaves. Tests also cover truncation, extension, altered proof fields, partial reads and files shorter than a trailer. Source, public constants, fixtures and reproduction instructions accompany the note.
+
+\paragraph{Bitmap coverage.}
+We evaluated the fixed cell allocation on three archives from the public RoaringBitmap benchmark collection~\cite{roaring}. Each text member gives the set bit indices of one bitmap. Every bitmap in an archive was packed to the same byte length, ending at the byte containing the archive-wide maximum index. Padding within that byte was zero. Byte lengths were respectively 534,726, 534,717 and 4,621,823 in the table order below. Each archive contains 200 members.
+\begin{center}\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Archive & Direct exact & Either exact\\
+\midrule
+\texttt{census1881} & 139 & 173\\
+\texttt{census1881\_srt} & 145 & 160\\
+\texttt{uscensus2000} & 163 & 163\\
+\bottomrule
+\end{tabular}
+\end{center}
+The direct weights and allocation were fixed before this evaluation. The spatial model was evaluated as a second representation. Splitting the original exact bank equally between the two predictors gave the same three counts on these files. Separate full banks preserve the original coverage for arbitrary inputs. The two 1881 archives are related representations, and their members fit in one chunk. The multichunk archive showed no gain from the spatial predictor. The encoder and full-file evaluator agreed on all 600 seals. Local verification recovered the expected bytes for all 496 exact files. The synthetic transition tests exercise changes across chunk boundaries.
+
+\paragraph{Measured cost.}
+With a reused codebook on the M4, seven warm in-memory runs over eight MiB gave median commitment times of 25.51 ms for zeros, 32.70 ms for ones, and 19.40 ms for pseudorandom bytes. A direct library SHA3-512 call took 14.96 ms for each input. Verification against the trusted exact ordinal took 1.17 ms for zeros and 14.11 ms for ones. Zeros use the direct bank and ones use the spatial inverse. These are Python implementation timings with memory-resident data and exclude certificate distribution. For the general branch the extra work includes framing, tree hashing and both predictor checks until elimination.
+
+\paragraph{Padding and scope.}
+For payload \(P\) with admissible certificate set \(W(P)\), exact separation of a family requires pairwise disjoint sets and hence \(\sum_P|W(P)|\le 2^{512}\) for that family. The canonical predictor choice keeps \(|W(P)|=1\), including when both descriptions fit. If optional padding participates in the physical payload, it must itself be authenticated to obtain byte equality. If it is normalized away, equality is instead defined on the normalized object.
+
+The general commitment and its tree proofs use SHA3-512. A trusted exact ordinal supplies expected bytes without a witness. For an ordinary file, the protocol can authenticate a chunk on arrival with a sibling proof, or authenticate the complete stream at its end with only the final certificate. The corpus counts describe these three archives. Equations~(\ref{eq:minent}) and~(\ref{eq:kl}) quantify coverage for other sources given their distributional parameters. Longitudinal block snapshots from an independent source would test the temporal model on a different distribution.
+
+\section{Normative ICC64/v1 encoding}\label{sec:wire}
+All integer arithmetic is exact. Write \(U(x)\) for minimal unsigned LEB128: emit base-128 digits least significant first, with the high bit set on every byte except the last. Zero is one zero byte. \(I_{64}(x)\) is an unsigned 64-byte big-endian string, including leading zeros. \(\mathrm{BE}(s)\) is the unsigned big-endian value of \(s\), with empty value zero. Hexadecimal byte strings below are in transmission order.
+
+\paragraph{Allocation.}
+A literal of \(n\le62\) bytes has ordinal \(O(n)+\mathrm{BE}(P)\), where \(O(n)=(256^n-1)/255\). Start the nonliteral table at \(O(63)\). Enumerate \(0\le b\le63\) with length interval \([\max(63,2^b),2^{b+1})\). Layout 0 requires \(n<B\) and \(v=0\), layout 1 requires \(n\ge B\) and \(B\mid n\), and layout 2 requires \(n\ge B\) and \(B\nmid n\). Use nonnegative weights with \(w+v\le32\). Compute each full count \(a\) by summing (\ref{eq:count}) over the eligible lengths. Take \(\binom zk=0\) when \(k>z\), and \(\binom00=1\). Omit empty cells. Sort in ascending integer lexicographic order of \((a,b,\mathrm{layout},w,v)\). At running offset \(o\), retain \(s=\min(a,K-o)\) entries and increment \(o\) by \(s\). Stop at \(K\). Within a cell use its zero-based ordinal from the rank formula above, retaining exactly ordinals \(0,\ldots,s-1\). In each position set count bits from zero; the change set's position zero is the low bit of byte \(B\). Both positions and ranks increase numerically. Encode a direct ordinal \(r\) as \(I_{64}(r)\). Otherwise try the spatial ordinal of \(T(P)\) and emit \(I_{64}(K+r)\) if available. Remaining inputs take the general route.
+
+\paragraph{Hash input bytes.}
+Let \(f(x)=U(|x|)\cat x\) for a byte string. For a one-byte role \(j\) define \(S_j(x_1,\ldots,x_k)\) as SHA3-512 of the concatenation of these components in order:
+\[
+ \underbrace{\mathtt{49434336342f763100}}_{\text{ASCII ICC64/v1, then NUL}}
+ \cat [j]\cat f(x_1)\cat\cdots\cat f(x_k).
+\]
+There is no field count or trailing delimiter. Tree leaves are \(S_1(U(i),p_i)\), nodes are \(S_2(l,r)\) on two raw 64-byte digests, and an empty tree is \(S_3()\). Number chunks from zero, split exactly at \(B\) bytes, and append no empty leaf at an exact boundary. A one-leaf root is its leaf digest; larger trees use the split in Section~\ref{sec:tree}. Path siblings are exactly 64 bytes each and ordered leaf-to-root. Direction is derived from \((n,i)\) and the split rule. Reject an index outside \([0,\lceil n/B\rceil)\), an incorrectly sized chunk, or a missing or surplus sibling.
+
+\paragraph{Range serialization.}
+For ordered fields \(X\) and width \(d\), set
+\begin{align*}
+ z&=\mathrm{BE}\big(S_j(\mathtt{00},X)\cat S_j(\mathtt{01},X)\big),\\
+ V_j(d;X)&=\lfloor zd/2^{1024}\rfloor .
+\end{align*}
+Here the counter is a one-byte field with its own length prefix, and \(X\) expands into individual framed fields. For a general tree root \(u\), emit \(I_{64}(2K+V_4(D;U(n),u))\). For a complete input with computed certificate \(g\) and supplied trailer \(t\), return \(g\) if their 64 bytes agree. Otherwise set \(b=[\mathrm{BE}(t)\in J]\) and \(y=2K+V_5(D-b;g,t)\). Return \(I_{64}(y+[b=1\ \land\ y\ge\mathrm{BE}(t)])\). Input \(F\) shorter than 64 bytes gives \(I_{64}(2K+V_6(D;F))\). An empty payload with its correct 64-byte trailer and a zero-byte physical file are different cases.
+
+\paragraph{Interoperability fixtures.}
+Serialize the allocation for comparison by concatenating, in allocation order, the seven minimal integers \(U(b),U(\mathrm{layout}),U(w),U(v),U(a),U(o),U(s)\) for each admitted cell. Hash this transcript directly with SHA3-512. There are 14,073 rows. The last shape is \((63,1,0,7)\). Its count, offset and retained length are recorded as decimal strings in the vector file. The transcript digest, in four successive 16-byte groups, is
+\begin{center}\small\ttfamily
+ef74a2f48c8725e8f6c67074f5213f70\\
+9a12df765338ced0c135cb14bacee3f7\\
+989fcbf9f660ea8e5ea3526216864317\\
+016d1ab0031860ec9ac3dc975ff81476
+\end{center}
+
+For a general-branch known answer, take exactly 63 copies of the byte \texttt{55}. Its 64-byte certificate is
+\begin{center}\small\ttfamily
+1a79ac1a09e9f92c4c743b85022f6000\\
+31c475708eb375c7c716d3a3ea37629b\\
+79d028c63301a320b6e6c5609f313da5\\
+42ca7ae6f85d0d0f7f96dc7095811511
+\end{center}
+
+The companion \texttt{interop/vectors.json} fixes all input bytes by length, fill byte and zero-based byte replacements. It includes direct and spatial examples, literal and variable-integer boundaries, a partial chunk, a three-leaf tree with a path and both range halves, short physical input, and both ends of the trailer-exclusion interval. The Python reference and a separate Node.js encoder reproduced all 12 payload certificates, five whole-file digests, the selected tree intermediates and both range halves. Their complete 2,401,366-byte allocation transcripts agreed byte for byte. The second encoder uses recursive tree splits and computes allocation counts by selecting occupied groups: the coefficient of \(x^k\) in \(((1+x)^s-1)^j\) counts ways to select \(k\) positions in \(j\) nonempty groups of size \(s\). Summing that coefficient times \(\binom{t}{j+1}\) over \(j\) gives the cumulative count over group lengths below \(t\), independently of the reference's forward differences. Conformance compares bytes; the authentication and coverage theorems hold independently of these test runs.
+
+\balance
+\begin{thebibliography}{9}\small
+\bibitem{nist} NIST, \emph{SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions}, FIPS 202, 2015. \href{https://doi.org/10.6028/NIST.FIPS.202}{doi:10.6028/NIST.FIPS.202}.
+\bibitem{cover} T. M. Cover, ``Enumerative source encoding,'' \emph{IEEE Trans. Inf. Theory}, 19(1), 73--77, 1973. \href{https://isl.stanford.edu/~cover/papers/transIT/0073cove.pdf}{Author's copy}.
+\bibitem{rfc} B. Laurie et al., \emph{Certificate Transparency Version 2.0}, RFC 9162, 2021, Sec. 2. \href{https://www.rfc-editor.org/rfc/rfc9162.html}{RFC Editor}.
+\bibitem{sp185} J. Kelsey, S. Chang, and R. Perlner, \emph{SHA-3 Derived Functions}, NIST SP 800-185, 2016. \href{https://doi.org/10.6028/NIST.SP.800-185}{doi:10.6028/NIST.SP.800-185}.
+\bibitem{roaring} RoaringBitmap project, \emph{Real Roaring Datasets}, revision \texttt{929d808}. \href{https://github.com/RoaringBitmap/real-roaring-datasets/tree/929d8088817840f43ffaa8592b49373b5a2d43b2}{Archived dataset revision}.
+\end{thebibliography}
+\end{document}
