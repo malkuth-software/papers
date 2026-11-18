@@ -1,0 +1,153 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[letterpaper,top=0.75in,bottom=0.8in,left=0.72in,right=0.72in,columnsep=0.27in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,microtype,balance}
+\usepackage[hidelinks]{hyperref}
+\hypersetup{pdftitle={Self-Hashing Certificates for Exact Integrity of Chunked Files},pdfsubject={Injective file encodings and trusted-certificate verification}}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newcommand{\cat}{\mathbin{\|}}
+\newcommand{\byte}[1]{\texttt{#1}}
+\newcommand{\len}[1]{\lvert #1\rvert}
+\newcommand{\U}{\mathsf{U}}
+\newcommand{\eps}{\varepsilon}
+\setlength{\emergencystretch}{0.8em}
+\setlength{\parindent}{1em}
+\title{\vspace{-2.5em}\bfseries Self-Hashing Certificates for Exact Integrity\\of Chunked Files}
+\author{\normalsize Malkuth Software}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+We construct a variable-length hash of finite byte strings with a computable inverse on its image. For each payload \(P\), a single appended certificate \(R(P)\) satisfies \(H(P\cat R(P))=R(P)\). Given a trusted copy of \(R(P)\), exactly one file passes verification, even if the party supplying the file has unlimited computation. The certificate identifies its format and specifies the payload length, chunk order and repetition counts. Each chunk identifier decodes to its original bytes. A concrete encoding assigns 32-byte identifiers to a specified family of \(2^{256}\) one-mebibyte bitmaps. The implementation produces a 43-byte certificate for one gibibyte of zeros and a 2,097,191-byte certificate for a 2,097,171-byte pseudorandom fixture. A counting bound relates these sizes to the number of payloads a certificate must distinguish.
+\end{abstract}
+
+\section{Verification against a trusted value}
+A publisher retains a certificate \(C\) for a byte string \(P\). A recipient obtains a file \(F\) through a channel on which any byte can be replaced. The question is whether the recipient can establish exact equality to the publisher's file using \(C\), including when \(F\) carries its own copy of the certificate.
+
+Let \(\Sigma=\{0,\ldots,255\}\), let \(\Sigma^*\) denote the finite byte strings, and write \(\cat\) for concatenation. We seek maps \(R,H:\Sigma^*\to\Sigma^*\) satisfying, for every \(P,F\),
+\begin{align}
+ H(P\cat R(P)) &= R(P), \label{eq:fixed}\\
+ H(F)=R(P) &\iff F=P\cat R(P). \label{eq:trust}
+\end{align}
+The trusted datum in (\ref{eq:trust}) is the entire byte string \(R(P)\). It can be supplied by a protected catalog. If a signature authenticates the catalog, the signature scheme supplies that step's authenticity. An embedded certificate by itself establishes consistency with the accompanying payload. Anyone can compute a consistent pair for a new payload.
+
+Exact certification has an elementary solution: retain the payload itself. Our construction uses the same information-theoretic principle. It specifies which payload families receive short certificates, how the certificate describes an arbitrarily long file, and how to evaluate a single injective function over the complete file, including the certificate bytes.
+
+\section{An ordered certificate}
+Fix \(B=2^{20}\) bytes. Let \(L\) be a public chunk encoder with a left inverse \(D_L\). Section~\ref{sec:leaf} specifies the encoder used for the measurements. For \(n=\len{P}\), split \(P\) at multiples of \(B\) into \(m=\lceil n/B\rceil\) nonempty chunks. The last chunk has its actual length. The empty payload has zero chunks. Replace each chunk by its identifier and form maximal runs of consecutive equal identifiers.
+
+Write \(\U(t)\) for minimal unsigned LEB128: emit the base-128 digits of \(t\) least significant first, with the high bit set on every byte except the last. Encode zero as \byte{00}. For a run of \(k\geq1\) copies of the identifier \(u\), put \(g=0\) if \(\len{u}=32\) and \(g=1\) otherwise. Emit \(\U(2(k-1)+g)\), then \(\U(\len{u})\) if \(g=1\), then \(u\). Let \(M(P)\) be the concatenation of these records in source order. With \(\mathrm{rev}\) denoting byte reversal, set
+\begin{align}
+ f(n)&=\mathrm{rev}(\U(n))\cat\byte{58 43 32 00},\\
+ R(P)&=M(P)\cat f(n). \label{eq:root}
+\end{align}
+The four terminal bytes designate the XC2 profile. A reader starts immediately before this tag and reads backward to obtain \(n\). On a sealed file this locates the payload boundary without a header. On a detached certificate it determines the number of chunks and the length required at each position.
+
+\begin{proposition}\label{prop:decode}
+The certificate has a public left inverse \(D_R\). Given \(n\), the end of \(M(P)\) can be found from its beginning even if more bytes follow.
+\end{proposition}
+\begin{proof}
+Read complete run records until their counts sum to \(m\). Each header determines the number of identifier bytes to consume. For \(m=0\) consume zero bytes. Decode each identifier with \(D_L\), expand its count, and concatenate the results. Require minimal integers, the prescribed length form, maximal runs, no overrun, canonical identifiers and the chunk lengths determined by \(n\). For a detached certificate require that the records end at the footer. These steps recover every chunk at its original position, so \(D_R(R(P))=P\).
+\end{proof}
+
+\section{Hashing the entire file}
+For an arbitrary raw file \(F\), parse the footer from its end. A footer is usable if the tag and minimal integer decode and at least \(n\) bytes precede it. In that case write \(F=P\cat T\cat f(n)\) with \(\len{P}=n\). The supplied \(T\) is unrestricted. Put \(M=M(P)\) and define
+\[
+ E(M,T)=
+ \begin{cases}
+ \mathrm{trim}_0(M\mathbin{\oplus}T),&\len M=\len T,\\
+ T\cat\byte{00},&\len M\ne\len T .
+ \end{cases}
+\]
+Here \(\oplus\) is bytewise exclusive-or and \(\mathrm{trim}_0\) removes all trailing zero bytes. The whole-file hash is
+\[
+ H(F)=
+ \begin{cases}
+ M\cat E(M,T)\cat f(n),&\text{usable footer},\\
+ F\cat\byte{FF},&\text{otherwise}.
+ \end{cases}
+\]
+
+\begin{theorem}\label{thm:exact}
+\(H\) is injective on all finite byte strings. For a declared payload \(P\), \(R(P)\) is the unique trailer of the form \(T\cat f(\len P)\) equal to the hash of the file carrying it. Equations~(\ref{eq:fixed}) and~(\ref{eq:trust}) hold.
+\end{theorem}
+\begin{proof}
+Construct a left inverse on the image of \(H\). A final \byte{FF} identifies an unusable-footer input and stripping that byte recovers it. Every usable-footer output ends in \byte{00}. Parse its footer and use Proposition~\ref{prop:decode} to consume \(M\) and recover \(P\). The remaining bytes before the footer are \(E\).
+
+If \(E\) is empty or ends in a nonzero byte, the original lengths agreed. Pad \(E\) on the right with zeros to \(\len M\) and XOR with \(M\) to recover \(T\). Otherwise the last byte of \(E\) is the marker from the unequal-length case. Removing it recovers \(T\). Reattaching the footer recovers the original \(F\) in both cases. Thus \(H\) is injective.
+
+For \(T=M\) the discrepancy is empty, proving (\ref{eq:fixed}). For equal lengths, equality of the supplied trailer and the output forces \(\len E=0\), hence \(T=M\). For unequal lengths, the output before the footer has length \(\len M+\len T+1>\len T\). This proves uniqueness at the declared boundary. Applying injectivity to \(H(F)=H(P\cat R(P))\) proves (\ref{eq:trust}).
+\end{proof}
+A verifier holding a trusted \(C\) may compare \(H(F)\) directly to \(C\). A verifier can also parse the file, recompute \(R\) from its payload, and require byte equality among the recomputed, attached and trusted certificates. Both procedures accept precisely the same file when \(C=R(P)\). The equality concerns the bytes at verification time. For each trusted certificate in the image of \(R\), the set of accepting files is a singleton. This excludes a second opening even for a party with private auxiliary information.
+
+\section{A reversible chunk identifier}\label{sec:leaf}
+We specify \(L\) so that the format and size results can be reproduced. Define the length offset and shortlex byte rank by
+\[
+ O(j)=(256^j-1)/255,\qquad b(s)=O(\len s)+\mathrm{BE}(s),
+\]
+where \(\mathrm{BE}\) reads an unsigned big-endian integer and \(\mathrm{BE}(\eps)=0\). Length \(j\) occupies exactly the integer interval \([O(j),O(j+1))\). Thus \(b^{-1}\) preserves leading zeros.
+
+\paragraph{Bitmap address.}
+Number bits within each byte from least to most significant, in file order. A full chunk has \(N=8B\) bits. Write \(s_1<\cdots<s_w\) for the zero-based positions of its ones. Within a weight class, its colexicographic rank is \(q=\sum_{i=1}^{w}\binom{s_i}{i}\). The rank across weights is
+\[
+ r=\sum_{j=0}^{w-1}\binom Nj+q .
+\]
+This is enumerative source coding~\cite{cover}. To unrank \(q\), choose the largest admissible \(s_w\) with \(\binom{s_w}{w}\le q\), subtract that term and repeat in descending order. The weight intervals are consecutive. The first \(2^{256}\) full chunks in this order exhaust weights 0 through 12 and include part of weight 13.
+
+\paragraph{Address assignment.}
+Put \(S=O(32)\) and \(A=S+2^{256}\). For \(\len p<32\) set \(a=b(p)\). For a full chunk in the selected family set \(a=S+r\). Reserve \(A\). For every remaining chunk, form the even literal index \(v=2(b(p)-S)\). If \(w\le64\), compute \(q\) from the set positions as above and form
+\[
+ d=\U(\len p)\cat[w]\cat\mathrm{BE}_{\min}(q).
+\]
+Here \([w]\) is one byte and the minimal big-endian representation of zero is empty. Replace \(v\) by \(\min(v,2b(d)+1)\). Finally set \(a=A+1+v\). The disjoint ranges identify the short and selected families. In the remaining range the parity of \(v\) identifies literal or sparse decoding. Both recover \(p\), and recomputing its address tests canonicality.
+
+\paragraph{Serialization.}
+Starting with \(a_0=a\), use widths \(h_i=264\cdot2^i\) bits and bases \(t_i=2^{h_i}-1\). While \(a_i>0\), divide \(a_i-1\) by \(t_i\), obtaining quotient \(a_{i+1}\) and remainder \(d_i-1\). Pack each \(d_i\) in a word of \(h_i\) bits, least significant word first, to form integer \(c\). Set \(L(p)=b^{-1}(c)\). For \(a=0\) the packed integer is zero. The first zero word in the zero-extended integer terminates the nonzero digits. Reversing \(a_i=t_i a_{i+1}+d_i\) recovers the address and hence the chunk. For a selected full chunk \(c=S+r\), since the address fits in one nonzero word. Its identifier is precisely the 32-byte big-endian representation of \(r\).
+
+\section{Certificate size and evaluation}
+Let \(\ell(t)=\len{\U(t)}\). A file of \(k\ge1\) selected full chunks with adjacent identifiers distinct has exactly \(33k+\ell(kB)+4\) certificate bytes. For \(k\) copies of a single selected chunk the size is \(\ell(2(k-1))+32+\ell(kB)+4\). Thus ordering retains its cost when neighboring values vary. For 1,024 zero chunks the terms are \(2+32+5+4=43\).
+
+For a lower bound, \(k\) independently chosen members of the selected family give \(2^{256k}\) different files of length \(kB\). There are only \(2^{256k}-1\) binary strings shorter than \(256k\) bits. Every injective certificate on this family therefore uses at least \(256k\) bits on some file. Over all \(n\)-byte files the same argument gives a worst-case lower bound of \(8n\) bits. Certificate size tracks the information that must be retained for recovery.
+
+\begin{table}[ht]
+\centering\small
+\caption{Payload and detached certificate lengths in bytes.}
+\label{tab:measure}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Payload & Payload bytes & Certificate\\
+\midrule
+Empty & 0 & 5\\
+Two distinct selected chunks & 2,097,152 & 74\\
+Three equal selected chunks & 3,145,728 & 41\\
+Two selected, 7-byte tail & 2,097,159 & 83\\
+Pseudorandom, 19-byte tail & 2,097,171 & 2,097,191\\
+One GiB of zeros & 1,073,741,824 & 43\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\balance
+A short test vector illustrates both trust comparisons. For the one-byte payload \byte{41}, the shortlex address fits in the first word and \(L(p)=p\). Its certificate in hexadecimal is
+\[
+ \underbrace{\byte{01 01 41}}_{\text{one run}}
+ \quad\underbrace{\byte{01 58 43 32 00}}_{\text{footer}} .
+\]
+Changing the payload to \byte{42} changes the required identifier to \byte{42}. Keeping the original trailer then fails the internal check. Replacing the identifier as well produces a consistent file whose certificate differs from the trusted value at its third byte.
+
+Table~\ref{tab:measure} reports byte counts from a Python implementation on an Apple M4. The distinct selected chunks have a single set bit at position 0 or 1. The seven-byte tail is ASCII \texttt{partial}. The dense fixture consists of the first \(2B+19\) output bytes of SHAKE256 on ASCII \texttt{XC2 high entropy fixture}. The checks covered 13 distinct boundary and multichunk certificates and recovered 850 distinct raw files from their digests. The one-GiB case was restored to a streaming sink and independently verified as a sealed sparse file. These checks exercise the representation and the implementation. The proof of exactness applies at every finite length.
+
+The encoder reads the payload once, compares adjacent chunks bytewise and computes one identifier per run. Sealing spools the manifest so that it can follow the payload. Verification can recompute the manifest from a seekable file and compare it with the attached bytes. Working memory comprises chunk buffers, leaf arithmetic and counters of \(O(\log(n+2))\) bits. Temporary storage for the manifest is proportional to its encoded length. Recovery writes \(n\) bytes even when one run describes the entire file.
+
+\section{Prior self-referential files}
+Cox constructed a ZIP archive that contains itself and described finding a consistent CRC-32 field by trying successive values in a space of \(2^{32}\) candidates~\cite{cox}. For MD5, spq and Rogdham independently produced GIFs displaying their own complete digests. Rogdham documents the use of MD5 collisions for selectable displayed digits and a brute-force search fixing six hexadecimal digits~\cite{rog}. These experiments solve a self-reference constraint for a preselected checksum. Their displayed values identify the result of running that checksum on the respective file.
+
+Kuhn and Dumontier embedded cryptographic identifiers in self-referential digital artifacts by defining how an identifier position is normalized during hashing~\cite{trusty}. The present construction evaluates the supplied certificate bytes through the discrepancy \(E\). This gives a unique fixed point for each declared payload and preserves a recoverable record of every other trailer. A trusted fixed point consequently determines both the original payload and the complete sealed file.
+
+\begin{thebibliography}{9}\small
+\bibitem{cover} T. M. Cover, ``Enumerative source encoding,'' \emph{IEEE Trans. Inf. Theory}, vol. 19, no. 1, pp. 73--77, 1973. \href{https://isl.stanford.edu/~cover/papers/transIT/0073cove.pdf}{Author's copy}.
+\bibitem{cox} R. Cox, ``Zip files all the way down,'' March 18, 2010. \url{https://research.swtch.com/zip}.
+\bibitem{rog} Rogdham, ``GIF MD5 hashquine,'' March 12, 2017. \href{https://www.rogdham.net/2017/03/12/gif-md5-hashquine.en}{Construction and comparison with spq's GIF}.
+\bibitem{trusty} T. Kuhn and M. Dumontier, ``Trusty URIs: Verifiable, immutable, and permanent digital artifacts for linked data,'' in \emph{Proc. ESWC}, 2014. \href{https://arxiv.org/abs/1401.5775}{arXiv:1401.5775}.
+\end{thebibliography}
+\end{document}
