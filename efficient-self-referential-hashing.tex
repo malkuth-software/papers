@@ -1,0 +1,168 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[margin=0.74in,columnsep=0.26in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,microtype,balance}
+\usepackage[hidelinks]{hyperref}
+\hypersetup{pdftitle={Efficient Self-Referential Hashing},pdfauthor={Malkuth Software}}
+\newtheorem{theorem}{Theorem}
+\newcommand{\cat}{\mathbin\Vert}
+\newcommand{\xor}{\mathbin\oplus}
+\newcommand{\bits}{\{0,1\}}
+\newcommand{\B}{\mathcal B}
+\newcommand{\E}{\mathsf E}
+\newcommand{\D}{\mathsf D}
+\setlength{\emergencystretch}{1.1em}
+\raggedbottom
+\title{\vspace{-2em}\bfseries Efficient Self-Referential Hashing}
+\author{\normalsize Malkuth Software}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+A self-referential file contains a trailer equal to the hash of all its bytes, including the trailer. We give two constructions that append a unique 64-byte trailer to any finite payload in one streaming pass. The first uses plaintext feed-forward. For payload-derived key \(k\), the hash of a file ending in \(t\) is \(\E_k(t)\xor t\), so the sealer obtains the trailer by decrypting zero. We bound full-file collisions in the ideal-cipher model and identify the corresponding concrete assumption for Threefish-512. The second construction uses two framed SHA3-512 inputs and an arithmetic correction. Any collision between distinct physical files yields a collision in the concrete SHA3-512 function with one invocation of the collision finder and no loss of success probability. This reduction includes undersized files and inconsistent trailers. Both constructions have an unconditional fixed-point theorem. In a matched memory benchmark on an Apple M4, sealing 16 MiB took 27.85 and 27.76 ms, respectively, compared with 27.76 ms for copying the payload and appending its ordinary SHA3-512 digest.
+\end{abstract}
+
+\section{Problem and security criterion}
+Let \(\B=\{0,\ldots,255\}\). A sealer takes \(P\in\B^*\) and writes \(P\cat T(P)\), preserving every payload byte. For a total public hash \(H:\B^*\to\bits^n\), with \(n\) byte-aligned, we require
+\[
+        H(P\cat t)=t \quad\Longleftrightarrow\quad t=T(P).
+\]
+The collision game accepts any distinct physical files \(F,F'\) satisfying \(H(F)=H(F')\). The finder may evaluate all public algorithms, generate its own seals, and submit a pair in which neither trailer is consistent. An external trusted digest \(h\) identifies a particular file. Internal consistency alone is satisfied by every correctly sealed payload.
+
+For a preselected random hash and a fixed \(P\), a fresh choice of \(t\) has probability \(2^{-n}\) of solving the equation. Choosing the hash structure makes a different approach possible. Cox described searching a 32-bit CRC field when constructing a ZIP archive that contains itself~\cite{cox}. Rogdham combined MD5 collisions with a search over six hexadecimal digits in a GIF that displays its own digest~\cite{gif}. Here the input file is arbitrary and the hash algorithm is part of the design.
+
+\section{Inverse-cipher construction}
+Let \(S\) map byte strings to \(n\)-bit keys. For each key \(k\), let \(\E_k\) be a public permutation of \(n\)-bit blocks, with inverse \(\D_k\). For a full-length file, set \(k=S(d\cat[0]\cat P)\), where \(d\) is a fixed profile tag and \([i]\) is one binary octet. Define
+\begin{align}
+ H_{\rm E}(P\cat t)&=\E_k(t)\xor t, \label{eq:mmo}\\
+ T_{\rm E}(P)&=\D_k(0^n). \label{eq:inverse}
+\end{align}
+The sealer hashes \(P\) as it writes it, decrypts one block and appends the result. The evaluator encrypts the supplied trailer and applies (\ref{eq:mmo}) to every file long enough to contain a trailer.
+
+\begin{theorem}
+For every \(P\), the unique self-hashing trailer under \(H_{\rm E}\) is \(T_{\rm E}(P)\).
+\end{theorem}
+\begin{proof}
+Cancelling \(t\) from both sides of \(\E_k(t)\xor t=t\) gives \(\E_k(t)=0^n\). A permutation has exactly one inverse image of zero.
+\end{proof}
+Inverting the seal rule fixes the ciphertext and asks for its plaintext. Hitting an independently specified digest \(h\) requires a plaintext and ciphertext whose XOR is \(h\). Public decryption is available in both problems.
+
+\paragraph{Physical-file encoding.}
+For \(n=512\), let \(d\) be ASCII \texttt{SHF512/v1} followed by one zero byte. For \(|F|\ge64\) parse the final 64 bytes as \(x\), all preceding bytes as \(P\), and put \(u=d\cat[0]\cat P\). For \(|F|<64\), take \(x=0^{512}\) and \(u=d\cat[1]\cat F\). In both cases evaluate \(\E_{S(u)}(x)\xor x\). The role byte and the fixed-width block make \(F\mapsto(u,x)\) injective. The implementation uses the raw bytes of FIPS 202 SHA3-512~\cite{nist} as the key to full 72-round Threefish-512 v1.3, with a zero 16-byte tweak and the cipher's standard little-endian word ordering~\cite{threefish}. No hexadecimal conversion takes place during hashing.
+
+\section{Security of plaintext feed-forward}
+The compression function \(C(k,x)=\E_k(x)\xor x\) is the Matyas--Meyer--Oseas form. The PGV literature analyzes this class of constructions under ideal-cipher access~\cite{pgv}. The following argument includes the public inverse used by the sealer and the short-input parser.
+
+\begin{theorem}
+A collision in \(H_{\rm E}\) yields either a collision in \(S\) or a collision in \(C\) on distinct key--block pairs.
+\end{theorem}
+\begin{proof}
+Parse the two files and compute their keys. If their key--block pairs differ, the equal output is a \(C\) collision. If those pairs agree, their blocks agree. Their framed prefixes must differ by injectivity of parsing, yet those prefixes produced the same key.
+\end{proof}
+
+In the ideal-cipher model, expose entries \((k,x,y)\) with \(y=\E_k(x)\). Write \(N=2^n\). After \(i\) entries overall, suppose \(j\le i\) are known at the next query's key. A fresh forward or inverse query fixes one endpoint and samples the other uniformly from \(N-j\) possibilities. Each earlier XOR value specifies at most one endpoint that would repeat it. The conditional collision probability is at most \(i/(N-i)\). A repeated entry introduces no new pair. For \(q\le N\) exposed entries, the sum of these probabilities is at most \(\binom q2/(N-q+1)\). If \(S\) is independently modeled as a random function with \(s\) distinct inputs, extraction gives
+\[
+ \Pr[\mathrm{collision}]\le
+ \min\!\left\{1,\frac{\binom{s}{2}}{N}
+                +\frac{\binom q2}{N-q+1}\right\}.
+\]
+The budgets include the evaluations required to check the submitted pair. Valid seals sample independent inverse images of zero at distinct ideal keys, so the birthday scale also occurs among correctly sealed files.
+
+The extraction theorem applies to the implemented primitives. The \(C\) term requires collision resistance of full-round Threefish in feed-forward use with public keys derived from adversarially chosen payloads. An ideal permutation per key supplies the displayed query bound. Secret-key encryption security alone gives no such bound for this compression function. The following construction removes this assumption while retaining the 64-byte trailer and the exact fixed-point property.
+
+\section{Two-probe construction from a concrete hash}
+Let \(S:\B^*\to\bits^{512}\) now denote the actual SHA3-512 function. Identify 64-byte strings with unsigned big-endian integers modulo \(N=2^{512}\); all additions and subtractions below use this modulus. Put \(e=\text{ASCII}(\texttt{DPSH512/v1})\cat[0]\). For two fixed-width words \(x,y\), write
+\[
+       L_P(x,y)=S(e\cat[0]\cat P\cat x\cat y).
+\]
+The last 128 bytes determine \(x,y\), so the input encoding of \((P,x,y)\) is injective without a length field. Let \(0\) as a word mean 64 zero bytes. The sealer appends
+\[
+                         a=L_P(0,0).
+\]
+To evaluate a complete file \(P\cat t\), form \(d=t-a\), \(b=L_P(d,0)\) and, if needed, \(c=L_P(d,d)\). Return
+\[
+ H_{\rm S}(P\cat t)=
+ \begin{cases}
+ b, & b\ne t,\\
+ c, & b=t,\ c\ne t,\\
+ t+d, & b=c=t .
+ \end{cases}                                                   \tag{3}
+\]
+For a physical file shorter than 64 bytes set \(H_{\rm S}(F)=S(e\cat[1]\cat F)\). The role octet separates its input from every long-file hash input. During verification the candidate hashes depend on the supplied trailer through \(d\). The evaluator compares their outputs with \(t\); it does not decide acceptance by comparing \(t\) with \(a\). A copy of the SHA3 absorption state after \(P\) permits all suffixes to be evaluated while reading \(P\) only once.
+
+\begin{theorem}
+For every payload \(P\) and every function \(S\) of the stated type, the unique fixed trailer of \(H_{\rm S}\) is \(a\).
+\end{theorem}
+\begin{proof}
+At \(t=a\), \(d=0\) and the anchor and both probes are evaluations on the same bytes. Thus \(b=c=t\) and (3) returns \(t\). At \(t\ne a\) we have \(d\ne0\). Either an unequal probe is returned, or modular addition returns \(t+d\ne t\).
+\end{proof}
+
+\begin{theorem}[Concrete collision extraction]\label{th:concrete}
+For any two distinct physical files with equal \(H_{\rm S}\) values, an explicit collision in \(S\) can be computed deterministically. The extractor makes one call to a putative file-collision finder and succeeds on every successful pair.
+\end{theorem}
+\begin{proof}
+Associate a hash input with each reported file, or return a primitive collision immediately.
+
+For a short file take its role-1 input. In either of the first two branches of (3), take the input of the returned probe. In the last branch with \(d=0\), take the input of \(L_P(0,0)\); the returned word is its hash. In the remaining case \(d\ne0\) and \(b=c=t\). The two inputs ending in \((d,0)\) and \((d,d)\) are distinct and hash to the same word. This is already a collision in \(S\).
+
+In the absence of this last witness the associated inputs hash to their respective file outputs. They are distinct for distinct physical files. The role identifies a short file directly. For a long-file label, its prefix fixes \(P\), the first suffix word fixes \(d\), and \(t=a+d\) recovers the supplied trailer. Equal associated inputs would therefore give identical files. Equal file outputs now give a collision on two distinct associated inputs.
+\end{proof}
+The extractor hashes each submitted prefix once if state cloning is available, with at most three constant-size suffix finalizations per long file. If a finder succeeds with probability \(\epsilon\) on this profile, the resulting SHA3-512 collision finder succeeds with probability at least \(\epsilon\) at this additive cost. This statement holds for the specified FIPS 202 implementation at the function level and uses no random-oracle or ideal-cipher substitution. NIST attributes 256 bits of collision-resistance strength to SHA3-512~\cite{strength}. The reduction transfers the primitive assumption; an unconditional numerical lower bound on collision search for concrete SHA3-512 would require a corresponding lower bound for the primitive.
+
+In concrete-security notation, if \(W\) is a collision finder's work budget and \(\Delta\) is the cost just described for checking its submitted pair, then
+\[
+ \mathrm{Adv}^{\rm coll}_{H_{\rm S}}(W)
+       \le \mathrm{Adv}^{\rm coll}_{S}(W+\Delta).
+\]
+In particular, replacing an honestly sealed file under its trusted digest yields a collision witness. In the exceptional case the witness consists of two probes of the replacement file itself. The theorem transfers collision resistance even in this case.
+
+The second probe serves a specific purpose. A single unexpected equality \(b=t\) at \(d\ne0\) gives no pair of equal SHA3 outputs. If both probes equal \(t\), their different suffixes supply precisely that pair. The arithmetic correction can then force a mismatch without introducing an unaccounted route to a file collision.
+
+\section{Reproduction and cost}
+Both algorithms accept every finite payload and append exactly 64 bytes. For a streaming full-file evaluator, retaining a rolling 64-byte suffix suffices to separate the trailer at EOF. For payload hex \texttt{616263}, the trailers below are shown as successive 16-byte groups; omit the line breaks and decode the hex when appending them.
+
+\paragraph{Inverse-cipher profile.}
+\begin{center}\small\ttfamily
+80f0a7b969df6a2ea2d9112be81b4c3b\\
+27f582c5def5ca468268a0fe30654b9d\\
+a2de440e0032f2daba995f79686cfd1a\\
+986a8f0e33ba8b19f8e8cc4e9113d803
+\end{center}
+\paragraph{Two-probe profile.}
+\begin{center}\small\ttfamily
+7664780ad3790ced1447068d5a521829\\
+99d28207bbf7b01f446e1c4c70289958\\
+fbfae146ab80c2ddc4384929fc2436fc\\
+8bd0bf33873af79627c97c516bc2747e
+\end{center}
+Each example gives a 67-byte file whose complete-file hash under the indicated profile equals its last 64 bytes. The verifier selects the agreed profile externally.
+
+The inverse-cipher Python reference passed two published Threefish known answers in both directions, all 64 short-input lengths, fragmented stream tests, and payload and trailer mutation checks. An independent Java implementation using JDK SHA3-512 and Bouncy Castle Threefish matched 16 frozen vectors. For the two-probe profile, separate Python and Node.js implementations matched 18 payload, valid-file and malformed-file vectors. An exhaustive one-bit model with two payload identities exercised all 256 choices of the two local hash tables, checking fixed-point uniqueness and the extracted labels. Forced equalities in the full-width evaluator also exercised the arithmetic branch at nonzero discrepancy.
+
+\begin{table}[ht]
+\centering\small
+\caption{Median time in milliseconds to materialize the payload and 64-byte trailer in a memory stream.}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Payload & Ordinary SHA3 & Inverse cipher & Two probes\\
+\midrule
+4 KiB & 0.0070 & 0.0925 & 0.0075\\
+1 MiB & 1.6770 & 1.7604 & 1.6764\\
+16 MiB & 27.7580 & 27.8492 & 27.7596\\
+\bottomrule
+\end{tabular}
+\end{table}
+Measurements used memory-resident pseudorandom inputs, Python 3.15.2 on an Apple M4, one warm-up per method, and 15 timed runs with rotated method order. All three arms copied the same bytes and appended a 64-byte value. The baseline appended SHA3-512 of the payload. Threefish ran in Python; SHA3 used the native library. These are sealing times. Two-probe sealing performs just the anchor finalization. Its general evaluator performs the anchor and up to two probe finalizations. The large-file cost in each case consists of one pass over the payload plus fixed work at its end.
+
+\paragraph{Choice of profile.}
+The inverse-cipher profile has the simpler verification formula: one public block encryption and one XOR after prefix hashing, independent of the trailer value. The two-probe profile gives the stronger assurance for a deployment whose established assumption is collision resistance of SHA3-512. Theorem~\ref{th:concrete} accounts for every accepted collision with the same success probability, including collisions involving inconsistent files.
+
+\balance
+\begin{thebibliography}{9}\small
+\bibitem{cox} R. Cox, \emph{Zip Files All the Way Down}, 2010. \href{https://research.swtch.com/zip}{Author's account}.
+\bibitem{gif} Rogdham, \emph{GIF MD5 Hashquine}, 2017. \href{https://www.rogdham.net/2017/03/12/gif-md5-hashquine.en}{Construction notes}.
+\bibitem{nist} NIST, \emph{SHA-3 Standard: Permutation-Based Hash and Extendable-Output Functions}, FIPS 202, 2015. \href{https://doi.org/10.6028/NIST.FIPS.202}{doi:10.6028/NIST.FIPS.202}.
+\bibitem{threefish} N. Ferguson et al., \emph{The Skein Hash Function Family}, v1.3, 2010, secs. 2.2, 3.3. \href{https://www.schneier.com/academic/skein/threefish/}{Designers' specification and test vectors}.
+\bibitem{pgv} J. Black, P. Rogaway, and T. Shrimpton, \emph{Black-Box Analysis of the Block-Cipher-Based Hash-Function Constructions from PGV}, CRYPTO 2002. \href{https://web.cs.ucdavis.edu/~rogaway/papers/hash.htm}{Authors' publication page}.
+\bibitem{strength} NIST, \emph{Hash Functions}, SHA-3 security strengths. \href{https://csrc.nist.gov/projects/hash-functions}{NIST Computer Security Resource Center}.
+\end{thebibliography}
+\end{document}
