@@ -1,0 +1,156 @@
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[hmargin=.72in,vmargin=.62in,columnsep=.27in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,microtype,hyperref,balance}
+\hypersetup{hidelinks,pdftitle={Circular Endorsement of Self-Hashing Files}}
+\setlength{\emergencystretch}{1.3em}
+\newtheorem{theorem}{Theorem}
+\newcommand{\cat}{\mathbin\Vert}
+\newcommand{\enc}{\operatorname{enc}}
+\newcommand{\Sign}{\operatorname{Sign}}
+\newcommand{\Ver}{\operatorname{Verify}}
+\newcommand{\zeros}{\mathbf{0}}
+\raggedbottom
+\title{\vspace{-2em}\bfseries Circular Endorsement of Self-Hashing Files}
+\author{\normalsize Malkuth Software Research Note}
+\date{}
+\begin{document}
+\maketitle
+\begin{abstract}
+We construct a file whose embedded signature endorses the digest of all its physical bytes, including that signature and the digest itself. Sealing takes one streaming pass over an arbitrary payload and one signature. The hash encodes the discrepancy in the signature verification equation as a group element. For a fixed public key, trailer, and committed signature fields, this element uniquely determines the remaining signature bytes. We use this fact to reduce any collision of physical files, including malformed files and files prepared by a key holder, to an explicit collision of SHA3-512. The reduction is deterministic and uses the concrete hash. One profile uses ordinary BLS signing. A second uses a randomized signer producing Ed25519-verifiable signatures. Two implementations agree on the completed files and on nonzero discrepancies. Benchmarks compare sealing and verification with signing a payload digest.
+\end{abstract}
+
+\section{The signed object}
+Let $P$ be any finite byte string, $A$ a public key, $Q$ a signature, and $t$ a 64-byte trailer. The object and its two verification equations are
+\[
+ F=P\cat A\cat Q\cat t,\qquad
+ H(F)=t,\qquad \Ver_A(t,Q)=1 .
+\]
+The detached verifier receives the 64 raw bytes of $t$ as its message. The file verifier receives every byte of $F$. A recipient authenticating a publisher additionally obtains its key from a trusted source. Application metadata, including certificate chains if desired, can be framed inside $P$ and is then covered byte for byte. Trust-path validation is an application operation.
+
+An ordinary ideal 512-bit hash supplies little help to a sealer. Before each fresh query the proposed file already specifies its final 512 bits. The conditional probability of a match is $2^{-512}$, even when the sealer can sign and add padding. For $q$ distinct queries including the final evaluation, the union bound is $q/2^{512}$. Our file hash is designed to admit the two equations above. SHA3-512~\cite{fips} supplies its internal digest.
+
+A signature verifier usually returns a Boolean. Using one success symbol for every valid encoding can lose physical identity. If $Q$ and $Q'$ are distinct valid signatures on the same chosen trailer, accepting both as interchangeable at that trailer would give two colliding files. The construction below retains a group-valued discrepancy. Its zero has exactly one signature completion for each choice of the fields already absorbed into the hash.
+
+\section{Two signature discrepancies}
+All point and scalar encodings below are canonical. A profile is chosen externally. Its domain $D$ consists of the ASCII bytes of \texttt{CESH1/BLS} or \texttt{CESH1/ED}, followed by a single zero octet. The field widths determine the splits from the end.
+
+\paragraph{BLS.}
+Use BLS12-381 in its minimal-public-key Basic profile~\cite{bls,blsdraft,curve}. Write $B_1$ for the generator of $G_1$, $A=xB_1$, and $M(t)$ for the ciphersuite hash into $G_2$. The public key and signature are compressed points of 48 and 96 bytes. Decode, check prime-subgroup membership, exclude the identity, and require exact byte-for-byte re-encoding. For any admitted pair define
+\begin{align*}
+ U &= e(B_1,Q)e(A,-M(t)),\\
+ v &= \enc(U)\mathbin\oplus\enc(1).
+\end{align*}
+Bilinearity gives $v=0$ for $Q=xM(t)$. Conversely, $Q\mapsto e(B_1,Q)$ is injective by nondegeneracy on the prime-order group, so the verification equation has exactly one group solution. This injection holds for an adversary who knows $x$. The signer can issue an ordinary Basic signature once $t$ is available. As in the reference profile, an identity hash-to-curve result would yield an inadmissible identity signature and the sealer reports failure. The Ed construction below covers every payload without this exceptional message.
+
+The ciphersuite domain concatenates these ASCII strings in order:
+\begin{flushleft}\small
+\texttt{BLS\_SIG\_BLS12381G2\_} and
+\texttt{XMD:SHA-256\_SSWU\_RO\_NUL\_}.
+\end{flushleft}
+Use the blst BLS12-381 field tower and reduced pairing. In its representation $u_{j,i,h}$, $j$ indexes the two $\mathbb F_{p^6}$ components, $i$ the three $\mathbb F_{p^2}$ components, and $h$ the real then imaginary coefficient. Serialize in nested loop order $i$, $j$, $h$, each index increasing from zero. Emit each base-field coefficient in exactly 48 big-endian bytes. The resulting 576-byte identity has its only nonzero byte, $1$, at offset 47. The companion vector includes a nonidentity residual.
+
+\paragraph{Ed25519.}
+Use the Ed25519 base point $B$, prime subgroup order $\ell$, RFC~8032 secret scalar $x$ and public key $A=[x]B$~\cite{ed}. Sample a fresh uniform $r\in\{1,\ldots,\ell-1\}$ and form $R=[r]B$ before deriving $t$. Sign $t$ by forming
+\begin{align*}
+ c &= \operatorname{LEint}(\operatorname{SHA512}
+       (\enc(R)\cat\enc(A)\cat t))\bmod\ell,\\
+ s &= r+cx \pmod\ell,\qquad Q=\enc(R)\cat\enc(s).
+\end{align*}
+Here $s$ uses 32 little-endian bytes and $0\le s<\ell$. Require $A$ and $R$ to be nonidentity canonical prime-subgroup points. With these restrictions ordinary Ed25519 verification agrees with the exact group equation. Define the 32-byte residual
+\[
+ v=\enc([s]B-[c]A)\mathbin\oplus\enc(R).
+\]
+For fixed $(A,R,t)$ it is injective in $s$ and vanishes precisely on a valid signature. The public nonce point enters the anchor defined below. Replacing it to obtain a different signature changes an anchor input. Nonce secrecy and fresh sampling matter: reuse across two distinct challenges reveals $x$. The signer requires control of $r$. Standard detached Ed25519 verifiers can verify its output.
+
+\section{A total file hash}
+Let $S=\mathrm{SHA3\text{-}512}$ and $k=64+|v|$ bytes. For a common prefix $W$ and two $k$-byte suffixes define
+\[
+ L_W(z,y)= S(W\cat z\cat y),\qquad
+ a=L_W(\zeros,\zeros).
+\]
+Here $\zeros$ denotes $k$ zero bytes. For admissible syntax put $W=D\cat P\cat A\cat\mathtt{00}$ in BLS, or $W=D\cat P\cat A\cat\enc(R)\cat\mathtt{00}$ in Ed. Interpret $t,a$ as big-endian integers and define
+\[
+ z=\operatorname{BE}_{64}((t-a)\bmod 2^{512})\cat v .
+\]
+For any such $z$, split it into successive groups of 64 bytes, allowing a shorter final group. Let $m(z)$ be the bitwise OR of their unsigned big-endian integer values. In particular $0\le m(z)<2^{512}$ and $m(z)=0$ exactly when $z=\zeros$. Define $b=L_W(z,\zeros)$, $b'=L_W(z,z)$, and output
+\[
+ H(F)=
+ \begin{cases}
+ b & b\ne t,\\
+ b' & b=t,\ b'\ne t,\\
+ (t+m(z))\bmod 2^{512} & b=b'=t.
+ \end{cases}
+\]
+Represent the answer in exactly 64 big-endian bytes. The two SHA3 probes use every byte of $z$, including the full signature residual.
+
+\paragraph{Arbitrary physical inputs.}
+For a string of at least 64 bytes with insufficient or inadmissible signature fields, write $F=X\cat t$. Use $W=D\cat X\cat\mathtt{01}$ and $z=t\cat\mathtt{01}\cat 0^{|v|-1}$, where powers here count zero octets. Apply the same output rule. For a string shorter than 64 bytes return $L_{D\cat F\cat\mathtt{02}}(\zeros,\zeros)$. Each label has its role byte immediately before the fixed-width suffixes. These three definitions partition all byte strings.
+
+\begin{theorem}[Circular endorsement]
+For admissible syntax, $H(F)=t$ if and only if $t=a$ and $\Ver_A(t,Q)=1$. A malformed file with a 64-byte trailer cannot be a fixed point.
+\end{theorem}
+\begin{proof}
+A returned unequal probe differs from $t$. In the last branch equality holds precisely when $m(z)=0$, hence $z=\zeros$. For admissible syntax this says both $t=a$ and $v=0$. Conversely when both hold, both probes equal the anchor $a=t$ and the correction adds zero. The malformed branch always has $z\ne\zeros$.
+\end{proof}
+
+\paragraph{Construction and verification.}
+Stream $D,P,A$ into a SHA3 state. In Ed append the chosen $\enc(R)$. Append the role byte and zero suffixes, obtaining $a$. Sign the literal bytes of $a$ and append $A,Q,a$ to the physical payload. In Ed the signer finishes its chosen nonce. In BLS it invokes ordinary signing on $a$. Verification can evaluate the raw $H$ and compare the trailer, or check the two conditions in the theorem directly. Both read the payload once. The latter can use an ordinary signature verifier after strict parsing and an anchor comparison. Full hashing clones the SHA3 prefix state before processing the differing suffixes. A stream from an unseekable source needs to retain at most the fixed footer in addition to its input buffer.
+
+\begin{theorem}[Physical-file collisions]
+For either fixed profile and any $F_0\ne F_1$ with $H(F_0)=H(F_1)$, a deterministic algorithm exhibits two distinct inputs to $S$ with equal outputs. The algorithm evaluates the two file hashes with recorded probe labels.
+\end{theorem}
+\begin{proof}
+If either evaluation uses the last output branch with $z\ne\zeros$, the labels $(W,z,\zeros)$ and $(W,z,z)$ are distinct and both hashed to $t$. Otherwise each returned value is the hash of a selected label: take its returned probe, the short-file label, or the all-zero probe when the correction is zero.
+
+Suppose two selected labels are identical. Their fixed-width suffixes give the same $W,z$ and role. For short files $W$ fixes $F$. In the malformed role $W$ recovers $X$ and the first 64 bytes of $z$ recover $t$. In the admissible role $W$ fixes $P,A$ and, in Ed, $R$. Hence $W$ fixes $a$, the first 64 bytes of $z$ recover $t$ by addition, and the rest give $v$. At those fixed fields the residual is injective in the remaining signature bytes. Therefore identical labels force identical files. For distinct files the selected labels are distinct and have the common output.
+\end{proof}
+
+The reduction loses no success probability and adds at most two complete file evaluations. It applies to adversarial keys, known secret keys, arbitrary trailers, and accepted or rejected signatures. It assumes the specified group arithmetic and canonical decoders. It requires neither a pairing inverse nor a discrete logarithm. Any concrete success bound for SHA3-512 collision finding at the resulting resources transfers directly. The conventional generic classical collision scale for a 512-bit ideal digest is $2^{256}$; a numerical lower bound of that size for concrete SHA3-512 remains an assumption.
+
+\section{Publisher authentication}
+Fix a trusted honest key $A$. Consider a seal oracle returning complete files for payloads of the adversary's choice. A forgery is a new physical file accepted under that key. In BLS, let $\epsilon_S$ bound concrete collision finding at the reduction resources and $\epsilon_{\rm sig}$ bound existential forgery under chosen-message signing. Then
+\[
+ \Pr[\text{new accepted file}]\ \le\ \epsilon_S+\epsilon_{\rm sig}.
+\]
+Indeed, the seal oracle can be simulated with one ordinary signing query on each requested anchor. Record each $(t,F)$. If the new file has an old $t$, it collides with a recorded file and the preceding theorem extracts an $S$ collision. A new $t$ yields a valid signature on a fresh message. This game models a key used to authorize seals. Access to an unrestricted signing service for that same key constitutes additional signing authority.
+
+In Ed, fresh-$t$ security involves the chosen-nonce signer: the signed message depends on the public nonce. A simulation must preserve that dependence. In the programmable random-oracle model for the SHA-512 challenge, choose a uniform 512-bit string $h$, let $c=\operatorname{LEint}(h)\bmod\ell$, sample uniform $s\in\mathbb Z_\ell$, and put $R=[s]B-[c]A$. Resample for identity $R$. This gives a uniform nonidentity $R$ independent of $c$. Compute the anchor $a(P,A,R)$ and program the challenge at $\enc(R)\cat\enc(A)\cat a$ to $h$. For $u$ previously defined challenge inputs, the probability of hitting one is at most $u/(\ell-1)$. Outside that event the simulated transcript has the signing distribution. A fresh-message forgery that queries its challenge can be forked at that query in the Schnorr argument~\cite{fork}: two responses with the same $(R,A,t)$ and distinct reduced challenges recover $x=(s-s')/(c-c')\bmod\ell$. Guessing an unqueried challenge succeeds with probability at most $\lceil 2^{512}/\ell\rceil/2^{512}$ for fixed nonidentity $A$. This is a proof sketch under a programmable challenge and discrete-log assumption. The concrete collision theorem for Ed requires neither assumption. Origin authentication and 512-bit file collision resistance have separate security parameters.
+
+\section{Implementation and cost}
+The native reference uses blst v0.3.16, libsodium 1.0.22 and Python's SHA3-512. A second evaluator in JavaScript uses noble-curves and Node's crypto library. It independently reproduces the fixed points, a changed-trailer digest and every byte of its nonidentity residual in each profile. OpenSSL via Node verifies the Ed signature on the trailer alone. In a second Ed experiment the key holder produced a different, ordinarily valid signature on the \emph{same} trailer. Both detached signatures verified. Substituting the second signature in the package changed its actual file hash and the package was rejected. The archive includes both signatures and both hashes.
+
+Each native profile passed checks on 14 payload lengths, including partial reads across the one-MiB I/O boundary, 95 single-byte mutations and all lengths below its footer size. A one-bit model with two payload prefixes exhausted 16,384 pairs of primitive tables and checked every file-pair collision extraction, including the exceptional two-probe branch. The general proofs hold independently of these checks.
+
+\begin{table}[ht]
+\centering
+\caption{Median per-file time on an Apple M4, in milliseconds. Within each pair, the first measurement signs or verifies an ordinary payload digest and the second uses the circular file.}
+\small
+\setlength{\tabcolsep}{3pt}\begin{tabular}{@{}llrrr@{}}
+\toprule
+ & Payload & Seal pair & Verify pair$^*$ & Raw$^\dagger$\\
+\midrule
+Ed & 4 KiB & .035 / .029 & .030 / .065 & .099\\
+   & 1 MiB & 1.708 / 1.709 & 1.692 / 1.742 & 1.771\\
+   & 16 MiB & 27.890 / 27.904 & 26.695 / 26.996 & 27.037\\
+BLS & 4 KiB & .251 / .248 & .646 / .655 & .564\\
+    & 1 MiB & 1.888 / 1.909 & 2.258 / 2.273 & 2.188\\
+    & 16 MiB & 28.075 / 28.068 & 27.307 / 27.555 & 27.471\\
+\bottomrule
+\end{tabular}
+\par\smallskip\raggedright\footnotesize
+$^*$The circular verifier checks the anchor and the ordinary signature with strict parsing. $^\dagger$The raw verifier evaluates $H$ on the physical file and checks the trusted key and trailer. For valid files both procedures decide the same predicate.
+\end{table}
+
+Each row uses 15 warm, rotated, in-memory repetitions. The baseline hashes $P$ once, then signs or verifies that digest with the same signature family. Both sealers write the whole file. Timings include Python overhead and native calls. In particular the conventional BLS verification path validates points before calling the library's complete verifier; the raw path computes a paired Miller loop and one final exponentiation. The small-file BLS difference therefore depends on these implementations. For Ed, strict point checks contribute even to the direct acceptance path. At 16 MiB the same SHA3 payload pass dominates all four sealing and verification pairs.
+
+Both profiles add a fixed footer: 160 bytes for Ed or 208 for BLS, comprising key, signature, and digest. The Ed footer is randomized; different seals of the same payload can yield distinct authentic object addresses. The BLS footer is deterministic for a fixed payload, key and profile. A detached verifier with the trusted $A$, $Q$ and $t$ can check that the publisher endorsed an address before fetching the file. Matching the downloaded bytes to that address still requires a complete file check. These are experimental profiles; the executable tests establish interoperability on the supplied vectors and the reductions describe the mathematical algorithms.
+
+\begin{thebibliography}{9}\small
+\bibitem{fips} NIST, \emph{SHA-3 Standard}, FIPS 202, 2015. \href{https://doi.org/10.6028/NIST.FIPS.202}{doi:10.6028/NIST.FIPS.202}.
+\bibitem{bls} D. Boneh, B. Lynn, H. Shacham, \href{https://crypto.stanford.edu/~dabo/pubs/abstracts/weilsigs.html}{``Short Signatures from the Weil Pairing,''} ASIACRYPT, 2001.
+\bibitem{blsdraft} D. Boneh et al., \href{https://datatracker.ietf.org/doc/draft-irtf-cfrg-bls-signature/}{\emph{BLS Signatures}}, CFRG Internet-Draft, Basic scheme.
+\bibitem{curve} A. Faz-Hernandez et al., \href{https://www.rfc-editor.org/rfc/rfc9380}{\emph{Hashing to Elliptic Curves}}, RFC 9380, 2023.
+\bibitem{ed} S. Josefsson and I. Liusvaara, \href{https://www.rfc-editor.org/rfc/rfc8032}{\emph{Edwards-Curve Digital Signature Algorithm}}, RFC 8032, 2017.
+\bibitem{fork} D. Pointcheval and J. Stern, \href{https://www.di.ens.fr/david.pointcheval/Documents/Papers/2000_joc.pdf}{``Security Arguments for Digital Signatures and Blind Signatures,''} \emph{J. Cryptology}, 13, 361--396, 2000.
+\end{thebibliography}
+\end{document}
