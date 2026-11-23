@@ -63,6 +63,7 @@ Sections~\ref{sec:ledger} and~\ref{sec:walk} bear them out: the ledger shows wha
 That the cost that matters is how far data travels and how soon it is in cache again.
 That the cache sizes should be read when the program starts, and the working set made to sit just under a cache level and not to fill it, a power of two being the worst fit.
 Section~\ref{sec:layout} follows from this: blocks of three quarters of the first-level cache, worked depth-first, and the gaps and the offset that keep power-of-two strides off the same cache sets.
+And that a step which reorders data should read scattered and write in order, never the reverse.
 
 \emph{Table-driven sine and cosine.}
 The twiddle routine is the successor of BFFT's own: go to the nearest of 256 stored points on the circle, rotate by what is left with a short polynomial, and cut the operands of the leading product so that it is exact as an ordinary multiply.
@@ -239,6 +240,11 @@ The caller's input and output remain contiguous.
 \emph{Offset of the second buffer.}
 The second work buffer is displaced from the first by an odd number of cache lines beyond a page multiple, so that a crossed pass's read streams and write streams do not compete for the same sets.
 
+\emph{Scattered reads, ordered writes.}
+A crossed pass has a choice of the order in which it runs its cells, since they are independent.
+It runs them in the order of the places they write: the reads are then scattered and the writes fill each cache line in turn.
+The opposite order, ordered reads and scattered writes, brings every line in before writing to it and evicts as it goes.
+
 \begin{figure*}[t]
 \centering
 \input{narrow.tex}
@@ -333,10 +339,10 @@ The caller supplies the workspace, so any number of threads may use one plan at 
 \centering
 \begin{tikzpicture}[x=0.15cm,y=0.42cm,font=\footnotesize]
 \foreach \v in {0,10,20,30,40,50} {
-  \draw[gray!45] (\v,0.4) -- (\v,-8.6);
-  \node[below] at (\v,-8.6) {\v};
+  \draw[gray!45] (\v,0.4) -- (\v,-9.6);
+  \node[below] at (\v,-9.6) {\v};
 }
-\node[below] at (25,-9.5) {running time removed (\%)};
+\node[below] at (25,-10.5) {running time removed (\%)};
 \def\bar#1#2#3#4#5{%
   \fill[black!70] (#2,-#1+0.22) rectangle (#3,-#1-0.22);
   \node[anchor=west] at (51,-#1+0.0) {#5};
@@ -348,9 +354,10 @@ The caller supplies the workspace, so any number of threads may use one plan at 
 \bar{3}{5}{6}{depth-first cache-sized blocks}{$N\ge2^{14}$}
 \bar{4}{1}{4}{offset second buffer}{$N\ge2^{16}$}
 \bar{5}{4}{6}{twiddle strips in run order}{$N\ge2^{19}$}
-\bar{6}{26}{51}{straight-line small kernels}{$N\le64$}
-\bar{7}{5}{14}{fused multiply-add}{all sizes}
-\bar{8}{6}{20}{magnitude in the last pass}{all sizes}
+\bar{6}{2}{6}{crossed cells in write order}{$N\ge2^{15}$}
+\bar{7}{26}{51}{straight-line small kernels}{$N\le64$}
+\bar{8}{5}{14}{fused multiply-add}{all sizes}
+\bar{9}{6}{20}{magnitude in the last pass}{all sizes}
 \end{tikzpicture}
 \caption{Share of running time removed by each ingredient, as a range over the sizes where it applies. Double precision, two-lane vectors, Apple M4. Each bar compares the transform with and without that one ingredient; the first compares against a split walk whose last three levels run singly; the last against the transform followed by a magnitude loop.}
 \label{fig:gains}
